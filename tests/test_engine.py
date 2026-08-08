@@ -351,6 +351,44 @@ def test_diverge_draft_dir_truncates_on_regeneration(tmp_path) -> None:
     assert path.read_text() == "完全な草案である。"
 
 
+def test_synthesize_streams_reconciliation_and_artifact_to_sink(tmp_path) -> None:
+    """昇華（reconciliation）と成果物（elevated）も、草案と同じ空ファイル先作成＋逐次追記で保存される。
+
+    草案のストリーム保存を draft 以外の生成成果物へ横展開したもの。
+    """
+    # 昇華推理は長さ下限（AUFHEBEN_MIN_LENGTH=60）を満たす必要があるため長めの文を使う
+    chunks = [
+        "昇華推理の結論は「両草案の対立を否定・保存・高次化する一段高い枠組み」であり、",
+        "単一観点では決して到達できない解を構成する。",
+    ]
+    client = _StreamingMockGenerator(chunks)
+    client.first_chunk_sink = tmp_path / "reconciliation.md"
+    engine = DraftEngine(client)
+    reconciliation, artifact = engine.synthesize_with_reconciliation(
+        _draft_pair(),
+        reconciliation_sink=tmp_path / "reconciliation.md",
+        artifact_sink=tmp_path / "elevated.md",
+    )
+    # 最初のチャンク到着時点で空ファイルが既に存在する（生成前に先作成）
+    assert client.file_state_at_first_chunk == (True, 0)
+    # モックは全コール同一文を返すため両ファイルとも同一内容で保存される
+    expected = "".join(chunks)
+    assert reconciliation == artifact == expected
+    assert (tmp_path / "reconciliation.md").read_text() == expected
+    assert (tmp_path / "elevated.md").read_text() == expected
+
+
+def test_generate_streams_raw_to_sink(tmp_path) -> None:
+    """素の生成（compare の raw ベースライン）も空ファイル先作成＋逐次追記で保存される。"""
+    client = _StreamingMockGenerator(["完全な", "分析", "である。"])
+    client.first_chunk_sink = tmp_path / "raw.md"
+    engine = DraftEngine(client)
+    out = engine.generate("タスク", sink=tmp_path / "raw.md")
+    assert client.file_state_at_first_chunk == (True, 0)
+    assert (tmp_path / "raw.md").read_text() == "完全な分析である。"
+    assert out == "完全な分析である。"
+
+
 # ---- SYNTHESIZE（核心） ----
 
 def test_synthesize_two_stage_reconcile_then_finalize() -> None:

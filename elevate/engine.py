@@ -362,36 +362,44 @@ def _generate_with_completeness_guard(
     raise RuntimeError(f"{label}が{AUFHEBEN_MAX_ATTEMPTS}回連続で打ち切り/不完全: {last_err}")
 
 
-def _generate_synthesis(generator: Generator, synthesis_user: str) -> str:
-    """単発昇華（method="single-pass"）を生成する。打ち切りは再生成し、直らない場合は明示的に失敗させる。"""
+def _generate_synthesis(generator: Generator, synthesis_user: str, *, sink: Path | None = None) -> str:
+    """単発昇華（method="single-pass"）を生成する。打ち切りは再生成し、直らない場合は明示的に失敗させる。
+
+    sink が与えられたら、生成前に空ファイルを作り、生成中に逐次追記する（草案と同じ）。
+    """
     return _generate_with_completeness_guard(
-        generator, ANALYSIS_SYSTEM + SYNTHESIS_SYSTEM, synthesis_user, label="昇華生成"
+        generator, ANALYSIS_SYSTEM + SYNTHESIS_SYSTEM, synthesis_user, label="昇華生成",
+        sink=sink,
     )
 
 
-def _generate_aufheben(generator: Generator, aufheben_user: str, *, temperature: float) -> str:
+def _generate_aufheben(generator: Generator, aufheben_user: str, *, temperature: float, sink: Path | None = None) -> str:
     """止揚（アウフヘーベン）を生成する。極端に短い（放棄した）出力は再生成。
 
     止揚は「思考の土台」で文終端記号で終わるとは限らないため、終端記号チェックは誤判定を
     招く（実測: 6104字の完全な推理が再生成ループに落ちた）。長さ下限で「止揚が実質的に
     存在するか」だけを判定する。空応答はクライアントが再試行済み。温度は 0.9
     （発散と同率。弁証法的跳躍に創造性を要するため）。
+    sink が与えられたら、生成前に空ファイルを作り、生成中に逐次追記する。
     """
     return _generate_with_completeness_guard(
         generator, AUFHEBEN_SYSTEM, aufheben_user,
         temperature=temperature, label="昇華",
-        is_complete=_aufheben_is_complete,
+        is_complete=_aufheben_is_complete, sink=sink,
     )
 
 
-def _generate_finalize(generator: Generator, finalize_user: str) -> str:
-    """最終分析を生成する。打ち切りは再生成。温度は 0.0（一貫性。止揚の基盤から超越的統合を明瞭に仕上げる）。"""
+def _generate_finalize(generator: Generator, finalize_user: str, *, sink: Path | None = None) -> str:
+    """最終分析を生成する。打ち切りは再生成。温度は 0.0（一貫性。止揚の基盤から超越的統合を明瞭に仕上げる）。
+    sink が与えられたら、生成前に空ファイルを作り、生成中に逐次追記する。
+    """
     return _generate_with_completeness_guard(
-        generator, ANALYSIS_SYSTEM + FINALIZE_SYSTEM, finalize_user, label="最終分析"
+        generator, ANALYSIS_SYSTEM + FINALIZE_SYSTEM, finalize_user, label="最終分析",
+        sink=sink,
     )
 
 
-def _generate_logic_check(generator: Generator, artifact: str, task: str) -> str:
+def _generate_logic_check(generator: Generator, artifact: str, task: str, *, sink: Path | None = None) -> str:
     """論理一貫性の復元工程。最終成果物を検査し、矛盾があれば修正版を返す。
 
     観察された creativity +0.10 / logic -0.05 の非対称（昇華が「多様化」に偏る）への
@@ -407,7 +415,8 @@ def _generate_logic_check(generator: Generator, artifact: str, task: str) -> str
     ]
     user = "\n\n".join(parts)
     return _generate_with_completeness_guard(
-        generator, ANALYSIS_SYSTEM + LOGIC_CHECK_SYSTEM, user, label="論理検査"
+        generator, ANALYSIS_SYSTEM + LOGIC_CHECK_SYSTEM, user, label="論理検査",
+        sink=sink,
     )
 
 
@@ -500,9 +509,17 @@ class DraftEngine:
 
     # ---- 素の生成 ----
 
-    def generate(self, task: str) -> str:
-        """素のAI（単発生成）: 温度 0.0 で分析成果物を生成する。1 call。"""
-        return self.client.generate(system=ANALYSIS_SYSTEM, user=task)
+    def generate(self, task: str, *, sink: Path | None = None) -> str:
+        """素のAI（単発生成）: 温度 0.0 で分析成果物を生成する。1 call。
+
+        草案と同じ完全性ガード（broken output → regenerate）を適用する——
+        打ち切られたベースラインを不公平に採点しない。sink が与えられたら、
+        生成前に空ファイルを作り、生成中に逐次追記する（草案と同じ横展開）。
+        """
+        return _generate_with_completeness_guard(
+            self.client, ANALYSIS_SYSTEM, task, label="素の生成",
+            is_complete=_synthesis_is_complete, sink=sink,
+        )
 
     # ---- エージェント管理 ----
 
@@ -563,6 +580,7 @@ class DraftEngine:
     def synthesize_with_reconciliation(
         self, drafts: list[Draft], method: str = "two-stage", task: str = "",
         *, enable_logic_check: bool | None = None,
+        reconciliation_sink: Path | None = None, artifact_sink: Path | None = None,
     ) -> tuple[str, str]:
         """昇華し、止揚（昇華の下地）と成果物を返す。
 
@@ -571,6 +589,10 @@ class DraftEngine:
 
         enable_logic_check=True で、最終化の後に論理一貫性の復元工程（_generate_logic_check）
         を適用する（既定: エンジンのコンストラクタ設定に従う。false なら従来動作のまま）。
+
+        reconciliation_sink / artifact_sink が与えられたら、それぞれの生成前に空ファイルを
+        作り、生成中に逐次追記する（草案のストリーム保存と同じ横展開）。論理検査が有効な
+        ときは、成果物の sink は最終化ではなく論理検査の出力に追記される（最終成果物と一致）。
         """
         if not drafts:
             raise ValueError("昇華対象の草案がありません")
@@ -579,18 +601,25 @@ class DraftEngine:
         if method == "two-stage":
             aufheben_user = _build_aufheben_prompt(task, drafts)
             reconciliation = _generate_aufheben(
-                self.client, aufheben_user, temperature=self.draft_temperature
+                self.client, aufheben_user, temperature=self.draft_temperature,
+                sink=reconciliation_sink,
             )
             finalize_user = _build_finalize_prompt(task, reconciliation)
-            artifact = _generate_finalize(self.client, finalize_user)
+            artifact = _generate_finalize(
+                self.client, finalize_user,
+                sink=None if enable_logic_check else artifact_sink,
+            )
             if enable_logic_check:
-                artifact = _generate_logic_check(self.client, artifact, task)
+                artifact = _generate_logic_check(self.client, artifact, task, sink=artifact_sink)
             return reconciliation, artifact
         if method == "single-pass":
             synthesis_user = _build_synthesis_prompt(task, drafts)
-            artifact = _generate_synthesis(self.client, synthesis_user)
+            artifact = _generate_synthesis(
+                self.client, synthesis_user,
+                sink=None if enable_logic_check else artifact_sink,
+            )
             if enable_logic_check:
-                artifact = _generate_logic_check(self.client, artifact, task)
+                artifact = _generate_logic_check(self.client, artifact, task, sink=artifact_sink)
             return "", artifact
         raise ValueError(f"未知の method: {method!r}（'two-stage' または 'single-pass'）")
 

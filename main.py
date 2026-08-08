@@ -355,7 +355,9 @@ def cmd_synthesize(args: argparse.Namespace) -> None:
     engine = _make_engine(args)
     drafts = _load_draft_files(args.draft_files)
     reconciliation, elevated = engine.synthesize_with_reconciliation(
-        drafts, method=args.method, task=args.task
+        drafts, method=args.method, task=args.task,
+        reconciliation_sink=args.out / "reconciliation.md" if args.out else None,
+        artifact_sink=args.out / "elevated.md" if args.out else None,
     )
     if reconciliation:
         _save(args, "reconciliation", reconciliation)
@@ -373,7 +375,9 @@ def cmd_elevate(args: argparse.Namespace) -> None:
         on_draft=lambda d: _report_draft(args, d),
     )
     reconciliation, elevated = engine.synthesize_with_reconciliation(
-        drafts, method=args.method, task=args.task
+        drafts, method=args.method, task=args.task,
+        reconciliation_sink=args.out / "reconciliation.md" if args.out else None,
+        artifact_sink=args.out / "elevated.md" if args.out else None,
     )
     if reconciliation:
         _save(args, "reconciliation", reconciliation)
@@ -534,7 +538,9 @@ def cmd_compare(args: argparse.Namespace) -> None:
             on_draft=lambda d: _report_draft(run_args, d),
         )
         reconciliation, elevated = engine.synthesize_with_reconciliation(
-            drafts, method=run_args.method, task=task
+            drafts, method=run_args.method, task=task,
+            reconciliation_sink=run_args.out / "reconciliation.md" if run_args.out else None,
+            artifact_sink=run_args.out / "elevated.md" if run_args.out else None,
         )
         if reconciliation:
             _save(run_args, "reconciliation", reconciliation)
@@ -546,7 +552,10 @@ def cmd_compare(args: argparse.Namespace) -> None:
             )
             baseline = best_draft.content
         else:
-            baseline = engine.generate(task)
+            baseline = engine.generate(
+                task,
+                sink=run_args.out / "raw.md" if run_args.out else None,
+            )
             baseline_score = None
 
         _save(run_args, "raw" if run_args.baseline == "single" else "best_single", baseline)
@@ -689,7 +698,9 @@ def cmd_improve(args: argparse.Namespace) -> None:
             on_draft=lambda d: _report_draft(round_args, d),
         )
         reconciliation, elevated = engine.synthesize_with_reconciliation(
-            drafts, method=args.method, task=task
+            drafts, method=args.method, task=task,
+            reconciliation_sink=round_args.out / "reconciliation.md" if round_args.out else None,
+            artifact_sink=round_args.out / "elevated.md" if round_args.out else None,
         )
         if reconciliation:
             _save(round_args, "reconciliation", reconciliation)
