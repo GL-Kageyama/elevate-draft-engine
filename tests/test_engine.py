@@ -50,7 +50,7 @@ class MockGenerator:
     def generate(self, system: str, user: str, *, temperature: float | None = None) -> str:
         self.calls.append({"system": system, "user": user, "temperature": temperature})
         if "Aufheben" in system:
-            # 昇華推理は長さ基準（30字以上）で判定される
+            # 昇華推理は長さ基準（60字以上）で判定される
             return (
                 "草案間の対立は「価値の最大化と実現性の担保」という軸に集約されるが、"
                 "弁証法的止揚（アウフヘーベン）により両者は一段高い次元で統合される。"
@@ -65,7 +65,7 @@ class MockGenerator:
 class FlakyGenerator:
     """最初の n_broken 回だけ不完全応答を返すモック（完全性ガードの検証用）。
 
-    broken は「推理（長さ<30）にも最終化（終端記号なし）にも不合格」な文字列。
+    broken は「推理（長さ<60）にも最終化（終端記号なし）にも不合格」な文字列。
     """
 
     def __init__(self, n_broken: int) -> None:
@@ -123,15 +123,17 @@ def test_load_agents_parses_frontmatter_name_and_body() -> None:
 
 
 def test_agents_mandate_draft_frame() -> None:
-    """各エージェントは草案末尾に「最強の主張」の定型を要求する。
+    """各エージェントは草案を「核心的主張/根拠/前提」のテーゼ集中形式で書くことを要求する。
 
-    昇華（Aufheben）が「各草案の最強の主張」を推測に頼らず確実に拾うための軽い枠。
+    草案は完全な分析レポートではなく、後の昇華（Aufheben）に渡す先鋭化した1つのテーゼ。
     「反論されそうな点」は含めない——草案に弱点を先読みさせると自由な逸脱が
     萎縮するため、反論の検出は昇華段階の Aufheber に任せる（不要・干渉）。
     """
     agents = load_agents()
     for name, prompt in agents.items():
-        assert "最強の主張" in prompt, f"{name}: 最強の主張セクションが欠落"
+        assert "核心的主張" in prompt, f"{name}: 核心的主張セクションが欠落"
+        assert "根拠" in prompt, f"{name}: 根拠セクションが欠落"
+        assert "前提" in prompt, f"{name}: 前提セクションが欠落"
         assert "反論されそうな点" not in prompt, f"{name}: 反論されそうな点セクションが残存"
 
 
@@ -171,14 +173,29 @@ def test_agents_override_param() -> None:
 # ---- 断言枠アブレーション（strong_claim_frame） ----
 
 def test_strip_strong_claim_removes_frame_from_all_agents() -> None:
-    """_strip_strong_claim は全エージェントから「最強の主張」枠と「枠を埋める」ステップを除去する。"""
+    """_strip_strong_claim は旧「最強の主張」枠と「枠を埋める」ステップを除去する。
+
+    新フォーマットの組み込みエージェントには旧枠が存在しないため除去は no-op だが、
+    旧枠を持つプロンプトが混入しても確実に除去される（後方互換の安全網）。
+    """
     agents = load_agents()
     for name, prompt in agents.items():
         stripped = _strip_strong_claim(prompt)
         assert "最強の主張" not in stripped, f"{name}: 最強の主張が残存"
         assert "枠を埋める" not in stripped, f"{name}: 枠を埋めるが残存"
-        assert len(stripped) < len(prompt), f"{name}: 短くなっていない"
         assert "You are the" in stripped, f"{name}: ペルソナ本文が失われている"
+        assert "核心的主張" in stripped, f"{name}: 新草案フォーマットが失われている"
+    # 旧枠を持つプロンプトでも除去される（後方互換の安全網）
+    # 「最強の主張」セクションは末尾まで除去される（旧形式では声の行が枠の後ろにあったため、
+    # 声の行も一緒に消える＝従来動作のまま）。
+    legacy = (
+        "## 草案の作り方\n6. **枠を埋める**: 末尾に付ける。\n\n"
+        "## 最強の主張\n（この草案で最も強く主張したいこと。）\nあなたの声は残る。"
+    )
+    stripped = _strip_strong_claim(legacy)
+    assert "最強の主張" not in stripped
+    assert "枠を埋める" not in stripped
+    assert "草案の作り方" in stripped  # 前置き部分は残る
 
 
 def test_strip_strong_claim_keeps_core_persona() -> None:
@@ -187,7 +204,7 @@ def test_strip_strong_claim_keeps_core_persona() -> None:
     stripped = _strip_strong_claim(prompt)
     assert "You are the **Strategist**" in stripped
     assert "草案の作り方" in stripped
-    assert "需要を特定する" in stripped  # 実質的な指示ステップは残る
+    assert "核心的主張" in stripped  # テーゼ集中形式の指示は残る
 
 
 def test_draftengine_no_strong_claim_strips_agents() -> None:
@@ -197,12 +214,13 @@ def test_draftengine_no_strong_claim_strips_agents() -> None:
     for name in engine.list_agents():
         assert "最強の主張" not in engine._agents[name]
         assert "枠を埋める" not in engine._agents[name]
+        assert "核心的主張" in engine._agents[name]  # テーゼ集中形式は維持
 
 
 def test_draftengine_strong_claim_default_keeps_frame() -> None:
-    """既定（strong_claim_frame=True）は枠を維持する（従来動作）。"""
+    """既定（strong_claim_frame=True）でもテーゼ集中形式が維持される（旧枠は新形式に置換）。"""
     engine = DraftEngine(MockGenerator())
-    assert "最強の主張" in engine._agents["strategist"]
+    assert "核心的主張" in engine._agents["strategist"]
 
 
 def test_diverge_without_strong_claim_passes_stripped_prompt() -> None:
@@ -213,6 +231,7 @@ def test_diverge_without_strong_claim_passes_stripped_prompt() -> None:
     system = client.calls[0]["system"]
     assert "最強の主張" not in system
     assert "枠を埋める" not in system
+    assert "核心的主張" in system  # テーゼ集中形式の指示は残る
 
 
 # ---- DIVERGE ----
@@ -450,6 +469,19 @@ def test_draft_complete_allows_markdown_closing() -> None:
     assert _draft_is_complete("結論である。**")
     assert _draft_is_complete("結論である。  ")
     assert not _draft_is_complete("結論は「この健保")
+
+
+def test_draft_over_max_length_is_incomplete() -> None:
+    """草案が上限（DRAFT_MAX_LENGTH）を超えたら不完全扱い（分析レポート化の防止）。"""
+    from elevate.engine import DRAFT_MAX_LENGTH, _draft_is_complete
+
+    assert _draft_is_complete("核心的主張。")
+    # 上限以内（本体 + 終端記号でちょうど上限）なら完全
+    assert _draft_is_complete("あ" * (DRAFT_MAX_LENGTH - 1) + "。")
+    # 上限を超えたら不完全（終端記号つきでも分析レポート化として再生成対象）
+    long = "あ" * DRAFT_MAX_LENGTH + "。"
+    assert not _draft_is_complete(long)
+
 
 def test_reconciliation_regenerates_when_too_short() -> None:
     """推理が30字未満（推理放棄）なら再生成する。"""

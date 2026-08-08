@@ -82,6 +82,8 @@ cd "$ENGINE_REPO"
 ```
 
 - `main.py` が保存する一式: `input.md` / `draft_{agent}.md` / `reconciliation.md`（昇華の下地）/ `elevated.md`（最終成果物）
+- 各草案は**テーゼ集中形式**（核心的主張/根拠/前提、500〜800字。`DRAFT_MAX_LENGTH`=1000字超過は再生成）——
+  完全な分析レポートではなく、後の昇華に渡す先鋭化した1つのテーゼ
 - 既存の草案ファイル群（人間が書いた分析等）を昇華する場合は `synthesize` を使う:
 
 ```bash

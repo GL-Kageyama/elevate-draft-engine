@@ -74,9 +74,9 @@ def test_best_of_n_selects_highest_overall_draft() -> None:
     """全草案を評価し、最高 overall の草案とそのスコアを返す。"""
     evaluator = main.MockEvaluator()
     drafts = [
-        main.Draft(agent="designer", content="これはエージェント「designer」からのモック草案である。designerらしい観点で描かれている。"),
-        main.Draft(agent="humanist", content="これはエージェント「humanist」からのモック草案である。humanistらしい観点で描かれている。"),
-        main.Draft(agent="strategist", content="これはエージェント「strategist」からのモック草案である。strategistらしい観点で描かれている。"),
+        main.Draft(agent="designer", content="【核心的主張】これはエージェント「designer」のモック草案である。designerの最重要論点。"),
+        main.Draft(agent="humanist", content="【核心的主張】これはエージェント「humanist」のモック草案である。humanistの最重要論点。"),
+        main.Draft(agent="strategist", content="【核心的主張】これはエージェント「strategist」のモック草案である。strategistの最重要論点。"),
     ]
     best, score = main._best_of_n(evaluator, drafts, "タスク")
     # MockEvaluator: designer 0.601 / strategist 0.682 / humanist 0.817 → humanist が最良
@@ -90,8 +90,8 @@ def test_mock_evaluator_scores_drafts_by_name() -> None:
     """草案はエージェント名に応じて決定的に異なるスコアになる（best が選べる）。"""
     ev = main.MockEvaluator()
     # MockEvaluator.evaluate(system, user) の system に成果物テキストが渡る
-    low = ev.evaluate("これはエージェント「designer」からのモック草案である。designerらしい観点で描かれている。", "タスク")
-    high = ev.evaluate("これはエージェント「humanist」からのモック草案である。humanistらしい観点で描かれている。", "タスク")
+    low = ev.evaluate("【核心的主張】これはエージェント「designer」のモック草案である。designerの最重要論点。", "タスク")
+    high = ev.evaluate("【核心的主張】これはエージェント「humanist」のモック草案である。humanistの最重要論点。", "タスク")
     assert low.overall != high.overall
     assert low.overall < high.overall
 

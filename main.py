@@ -41,7 +41,7 @@ def _build_parser() -> argparse.ArgumentParser:
     common.add_argument("--method", default="two-stage", choices=["two-stage", "single-pass"], help="昇華方式（既定 two-stage）")
     common.add_argument("--agents", nargs="+", default=None, help="使用するエージェント（既定: 全エージェント）")
     common.add_argument("--out", type=Path, default=None, help="成果物を保存するディレクトリ（省略時は outputs/{タスク名}/ にデフォルト保存）")
-    common.add_argument("--no-strong-claim", action="store_true", help="エージェントから「最強の主張」断言枠を除去（アブレーション: 枠あり/なしの昇華品質差を測定）")
+    common.add_argument("--no-strong-claim", action="store_true", help="エージェントから旧「最強の主張」断言枠を除去（テーゼ集中形式では実質 no-op。後方互換のため維持）")
     common.add_argument("--runs", type=int, default=1, help="compare の比較を N 回反復して統計集計（平均・勝率・標準偏差・95%信頼区間）を出力（既定 1）")
     common.add_argument("--baseline", default="single", choices=["single", "best-of-n"], help="compare の比較対象ベースライン（既定 single: 素の単発生成 / best-of-n: 昇華なし最良草案選択＝帰無仮説）")
     common.add_argument("--logic-check", action="store_true", help="最終化の後に論理一貫性の復元工程を適用（昇華の多様化への偏りへの収束工程。既定は無効。旧5軸実測由来）")
@@ -136,12 +136,20 @@ class MockGenerator:
     ) -> str:
         self.calls.append((system, user, temperature))
         # エージェント草案: 観点名を込めたモック草案を返す
-        # 「草案の作り方」で検出する（--no-strong-claim で「最強の主張」枠を剥がしても
-        # このマーカーとペルソナ名（You are the **Name**）は残るため、安定に識別できる）。
+        # 「草案の作り方」で検出する（テーゼ集中形式の組み込みエージェントに
+        # 共通するマーカーで、ペルソナ名（You are the **Name**）と合わせて安定に識別できる）。
         if "草案の作り方" in system:
             m = _PERSONA_NAME_RE.search(system)
             name = m.group(1).lower() if m else "unknown"
-            text = f"これはエージェント「{name}」からのモック草案である。{name}らしい観点で描かれている。"
+            # テーゼ集中形式（核心的主張/根拠/前提）のモック草案を返す。
+            # MockEvaluator は「モック草案」と「エージェント「{name}」」で観点名を拾う。
+            text = (
+                f"【核心的主張】これはエージェント「{name}」のモック草案である。"
+                f"{name}の観点を極限まで推し進めた先鋭的テーゼを提示する。\n"
+                f"- 根拠1: {name}の最重要論点。\n"
+                f"- 根拠2: 他観点との対立軸。\n"
+                f"【前提】この主張はモックテスト用の仮定に基づく。"
+            )
             # 改修ラウンド（round 2 以降）: 前回の昇華版の骨子を引き継ぐ改修草案を返す。
             # モック上、昇華版を磨くループの「改善の可視化」を再現するマーカーで、既に読まれて
             # いる改修度（改修度N）を引き継ぎ+1して次段へ渡す（実APIの改善過程の決定的な模倣）。
@@ -149,7 +157,7 @@ class MockGenerator:
                 prev_core = user.split("【改修対象: 前回の昇華版】", 1)[1].split("。", 1)[0][:40]
                 n = user.count("改修度") + 1
                 text += f" 改修草案（改修度{n}）として、前回の昇華版「{prev_core}…」の骨子を引き継ぎ磨き上げる。"
-        # 昇華推理（Aufheben）: 長さ基準（最小30字）を満たす止揚推理らしい文を返す
+        # 昇華推理（Aufheben）: 長さ基準（最小60字）を満たす止揚推理らしい文を返す
         elif "Aufheben" in system:
             text = (
                 "草案間の対立は「価値の最大化と実現性の担保」という軸に集約されるが、"
