@@ -20,6 +20,9 @@
     --output-format JSON  出力形式（OutputFormat）を明示指定（LLM 抽出をスキップ。mock でも有効）。
                           省略時は実APIでタスクから LLM が動的に抽出し、全段階に注入する
                           （キャッチコピー・歌詞・事業計画など分野ごとの形式）
+    --knowledge TEXT      前提知識を直接指定（素材・制約・背景情報。生成の土台として全段階に注入）
+    --knowledge-file PATH 前提知識をファイルから読み込み（長文の資料等）
+    --ask-knowledge       起動時に対話的に前提知識を入力（--out/knowledge.md に保存）
 
 認証: ANTHROPIC_API_KEY（通常）または ANTHROPIC_AUTH_TOKEN + ANTHROPIC_BASE_URL（ゲートウェイ）。
 スロットル（空応答対策）は既定 2 秒（CLAUDE_MIN_INTERVAL_SECONDS で変更可）。
@@ -54,6 +57,13 @@ def _build_parser() -> argparse.ArgumentParser:
                              "例: '{\"deliverable_type\":\"キャッチコピー\",\"min_output_length\":2,"
                              "\"max_output_length\":300,\"output_is_direct\":true}'。"
                              "未指定ならタスクから LLM が動的に抽出する（実API時のみ）。")
+    kgroup = common.add_mutually_exclusive_group()
+    kgroup.add_argument("--knowledge", default=None, metavar="TEXT",
+                        help="前提知識（素材・制約・背景情報）を直接指定する。生成の土台として全段階（草案・止揚・最終化）に注入される")
+    kgroup.add_argument("--knowledge-file", default=None, type=Path, metavar="PATH",
+                        help="前提知識をファイルから読み込む（長文の資料・設計情報等）")
+    kgroup.add_argument("--ask-knowledge", action="store_true",
+                        help="起動時に対話的に前提知識を入力する（--out/knowledge.md に保存）")
 
     p = argparse.ArgumentParser(
         prog="elevate-draft-engine",
@@ -377,6 +387,44 @@ def _save_format_spec(args: argparse.Namespace, fmt: OutputFormat) -> None:
     print(f"→ 保存: {path}")
 
 
+def _resolve_knowledge(args: argparse.Namespace) -> str | None:
+    """前提知識を解決する。指定がなければ None（従来挙動）。
+
+    - `--knowledge "text"`   : そのまま使う
+    - `--knowledge-file PATH` : ファイルを読み込む（存在しなければ FileNotFoundError）
+    - `--ask-knowledge`       : 起動時に対話的に入力（Ctrl+D で終了 / 空入力は知識なし）
+    """
+    if getattr(args, "knowledge", None):
+        text = args.knowledge
+    elif getattr(args, "knowledge_file", None):
+        path = args.knowledge_file
+        if not path.exists():
+            raise FileNotFoundError(f"前提知識ファイルがありません: {path}")
+        text = path.read_text(encoding="utf-8")
+    elif getattr(args, "ask_knowledge", False):
+        try:
+            text = input("前提知識を入力してください（Ctrl+D で終了）:\n")
+        except EOFError:
+            text = ""
+    else:
+        return None
+    text = text.strip()
+    if not text:
+        return None
+    print(f"→ 前提知識（{args.knowledge_file if getattr(args, 'knowledge_file', None) else '入力'}）: {len(text)} 字")
+    return text
+
+
+def _save_knowledge(args: argparse.Namespace, knowledge: str | None) -> None:
+    """前提知識を knowledge.md として保存する（input.md / format.md と並列）。"""
+    if args.out is None or not knowledge:
+        return
+    args.out.mkdir(parents=True, exist_ok=True)
+    path = args.out / "knowledge.md"
+    path.write_text(f"# 前提知識\n\n{knowledge}\n")
+    print(f"→ 保存: {path}")
+
+
 def _agent_of(path: Path) -> str:
     """草案ファイルのエージェント名（拡張子なしのファイル名）。"""
     return path.stem
@@ -461,7 +509,9 @@ def _save_input(args: argparse.Namespace, task: str) -> None:
 def cmd_generate(args: argparse.Namespace) -> None:
     engine = _make_engine(args)
     fmt = _resolve_output_format(args, engine)
-    _print_artifact("素の生成（単発）", engine.generate(args.task, fmt=fmt))
+    knowledge = _resolve_knowledge(args)
+    _save_knowledge(args, knowledge)
+    _print_artifact("素の生成（単発）", engine.generate(args.task, fmt=fmt, knowledge=knowledge))
 
 
 def _report_draft_error(agent: str, exc: Exception) -> None:
@@ -497,8 +547,10 @@ def cmd_diverge(args: argparse.Namespace) -> None:
     _resolve_out(args, args.task)
     engine = _make_engine(args)
     fmt = _resolve_output_format(args, engine)
+    knowledge = _resolve_knowledge(args)
+    _save_knowledge(args, knowledge)
     drafts = engine.diverge(
-        args.task, agents=args.agents, fmt=fmt,
+        args.task, agents=args.agents, fmt=fmt, knowledge=knowledge,
         draft_dir=args.out / "drafts" if args.out else None,
         on_draft=lambda d: _report_draft(args, d),
         on_error=_report_draft_error,
@@ -510,9 +562,11 @@ def cmd_diverge(args: argparse.Namespace) -> None:
 def cmd_synthesize(args: argparse.Namespace) -> None:
     engine = _make_engine(args)
     fmt = _resolve_output_format(args, engine)
+    knowledge = _resolve_knowledge(args)
+    _save_knowledge(args, knowledge)
     drafts = _load_draft_files(args.draft_files)
     reconciliation, elevated = engine.synthesize_with_reconciliation(
-        drafts, method=args.method, task=args.task, fmt=fmt,
+        drafts, method=args.method, task=args.task, fmt=fmt, knowledge=knowledge,
         reconciliation_sink=args.out / "artifacts/reconciliation.md" if args.out else None,
         artifact_sink=args.out / "artifacts/elevated.md" if args.out else None,
     )
@@ -527,14 +581,16 @@ def cmd_elevate(args: argparse.Namespace) -> None:
     engine = _make_engine(args)
     _save_input(args, args.task)
     fmt = _resolve_output_format(args, engine)
+    knowledge = _resolve_knowledge(args)
+    _save_knowledge(args, knowledge)
     drafts = engine.diverge(
-        args.task, agents=args.agents, fmt=fmt,
+        args.task, agents=args.agents, fmt=fmt, knowledge=knowledge,
         draft_dir=args.out / "drafts" if args.out else None,
         on_draft=lambda d: _report_draft(args, d),
         on_error=_report_draft_error,
     )
     reconciliation, elevated = engine.synthesize_with_reconciliation(
-        drafts, method=args.method, task=args.task, fmt=fmt,
+        drafts, method=args.method, task=args.task, fmt=fmt, knowledge=knowledge,
         reconciliation_sink=args.out / "artifacts/reconciliation.md" if args.out else None,
         artifact_sink=args.out / "artifacts/elevated.md" if args.out else None,
     )
@@ -670,6 +726,8 @@ def cmd_compare(args: argparse.Namespace) -> None:
     engine = _make_engine(args)
     _save_input(args, task)
     fmt = _resolve_output_format(args, engine)
+    knowledge = _resolve_knowledge(args)
+    _save_knowledge(args, knowledge)
 
     runs = max(1, args.runs)
     baseline_scores: list[float] = []
@@ -701,13 +759,13 @@ def cmd_compare(args: argparse.Namespace) -> None:
         # run_02 以降は前回の昇華版を改修する草案（改訂草案）を書かせる（累積モード）
         draft_task = _revision_task(task, elevated_prev) if elevated_prev is not None else task
         drafts = engine.diverge(
-            draft_task, agents=run_args.agents, fmt=fmt,
+            draft_task, agents=run_args.agents, fmt=fmt, knowledge=knowledge,
             draft_dir=run_args.out / "drafts" if run_args.out else None,
             on_draft=lambda d: _report_draft(run_args, d),
             on_error=_report_draft_error,
         )
         reconciliation, elevated = engine.synthesize_with_reconciliation(
-            drafts, method=run_args.method, task=task, fmt=fmt,
+            drafts, method=run_args.method, task=task, fmt=fmt, knowledge=knowledge,
             reconciliation_sink=run_args.out / "artifacts/reconciliation.md" if run_args.out else None,
             artifact_sink=run_args.out / "artifacts/elevated.md" if run_args.out else None,
         )
@@ -722,7 +780,7 @@ def cmd_compare(args: argparse.Namespace) -> None:
             baseline = best_draft.content
         else:
             baseline = engine.generate(
-                task, fmt=fmt,
+                task, fmt=fmt, knowledge=knowledge,
                 sink=run_args.out / "artifacts/raw.md" if run_args.out else None,
             )
             baseline_score = None
@@ -853,6 +911,8 @@ def cmd_improve(args: argparse.Namespace) -> None:
     engine = _make_engine(args)
     _save_input(args, task)
     fmt = _resolve_output_format(args, engine)
+    knowledge = _resolve_knowledge(args)
+    _save_knowledge(args, knowledge)
 
     rounds = max(1, args.rounds)
     elevated_prev: str | None = None
@@ -875,13 +935,13 @@ def cmd_improve(args: argparse.Namespace) -> None:
             draft_task = _revision_task(task, elevated_prev)
 
         drafts = engine.diverge(
-            draft_task, agents=args.agents, fmt=fmt,
+            draft_task, agents=args.agents, fmt=fmt, knowledge=knowledge,
             draft_dir=round_args.out / "drafts" if round_args.out else None,
             on_draft=lambda d: _report_draft(round_args, d),
             on_error=_report_draft_error,
         )
         reconciliation, elevated = engine.synthesize_with_reconciliation(
-            drafts, method=args.method, task=task, fmt=fmt,
+            drafts, method=args.method, task=task, fmt=fmt, knowledge=knowledge,
             reconciliation_sink=round_args.out / "artifacts/reconciliation.md" if round_args.out else None,
             artifact_sink=round_args.out / "artifacts/elevated.md" if round_args.out else None,
         )

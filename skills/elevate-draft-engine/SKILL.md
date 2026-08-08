@@ -1,14 +1,14 @@
 ---
 name: elevate-draft-engine
 description: Facade to invoke the elevate-draft-engine pipeline (diverge → aufheben → finalize). Given a task, runs the Python engine via main.py, saves input + each draft + reconciliation + elevated artifact into examples/<task>/ (or a custom dir), and reports the result. Supports elevate / improve（昇華版→改修草案→昇華の反復）/ compare（素の生成 vs 昇華の実測）. All orchestration, completeness guards, and temperature control live in the engine — this skill only calls it. Use to elevate an idea through dialectical sublation (Aufheben) of maximally-divergent creator drafts, to re-sublimate existing draft files, to iteratively refine an elevated artifact, or to measure whether aufheben beats single-shot generation.
-argument-hint: 'JSON: {"command": "elevate|improve|compare|synthesize", "task": "<タスク>", "agents": ["strategist","humanist",...], "method": "two-stage|single-pass", "engine": "claude-code|sdk|mock", "rounds": 3, "evaluate": true, "min_improve": 0.01, "quality_ceiling": 0.85, "runs": 1, "baseline": "single|best-of-n", "output_format": "<任意指定; OutputFormat の JSON。省略でタスクから LLM が動的に抽出>", "save_dir": "<任意指定; 省略で examples/<slug> に自動保存>"}'
+argument-hint: 'JSON: {"command": "elevate|improve|compare|synthesize", "task": "<タスク>", "agents": ["strategist","humanist",...], "method": "two-stage|single-pass", "engine": "claude-code|sdk|mock", "rounds": 3, "evaluate": true, "min_improve": 0.01, "quality_ceiling": 0.85, "runs": 1, "baseline": "single|best-of-n", "output_format": "<任意指定; OutputFormat の JSON。省略でタスクから LLM が動的に抽出>", "knowledge": "<任意指定; 前提知識（素材・制約・背景）。生成の全段階に注入し --out/knowledge.md に保存>", "knowledge_file": "<任意指定; 前提知識をファイルから読み込む>", "ask_knowledge": "<任意指定; 起動時に対話入力>", "save_dir": "<任意指定; 省略で examples/<slug> に自動保存>"}'
 ---
 
 # Elevate Draft Engine — Facade
 
 ## Skill Metadata
 - **id**: `elevate-draft-engine`
-- **version**: `2.1.0`
+- **version**: `2.2.0`
 - **category**: `facade`（runbook。オーケストレーションは Python エンジンが担当）
 - **standalone**: `true`（サブエージェントを必要としない。エージェントはエンジンが `agents/*.md` から読む）
 - **requires_agents**: `[]`
@@ -53,6 +53,9 @@ Python エンジン側にある。**クリエイターエージェントをサ�
 | `runs` | `1` | `compare` のみ: 比較を N 回反復し統計集計（平均・勝率・標準偏差・95%CI）を出力 |
 | `baseline` | `single` | `compare` のみ: `single`（素の単発生成）/ `best-of-n`（昇華しない最良草案選択＝帰無仮説） |
 | `output_format` | 動的抽出 | OutputFormat の JSON を明示指定（LLM 抽出をスキップ。mock でも有効）。省略時は実APIでタスクから LLM が動的に抽出（キャッチコピー・歌詞・事業計画など分野ごとの形式） |
+| `knowledge` | なし | 前提知識（素材・制約・背景情報）。文字列を直接指定。生成の全段階（草案・止揚・最終化）にタスク直後として注入され、`--out/knowledge.md` に保存される（input.md / format.md と並列）。`knowledge_file`（PATH を読み込む）/ `ask_knowledge`（起動時に対話入力）も可。相互排他 |
+| `knowledge_file` | なし | 前提知識をファイルから読み込む（`knowledge` と相互排他） |
+| `ask_knowledge` | `false` | 起動時に対話的に前提知識を入力する（`knowledge` と相互排他） |
 | `save_dir` | 自動 | 保存先。省略時 `examples/<slug>/`（下記） |
 
 ### Step 2: エンジンの場所を特定する
@@ -80,11 +83,13 @@ cd "$ENGINE_REPO"
   --engine claude-code \
   ${AGENTS:+--agents $AGENTS} \
   --method two-stage \
+  ${KNOWLEDGE:+--knowledge "$KNOWLEDGE"} \
   --out "$SAVE_DIR"
 ```
 
 - `main.py` が保存する一式は**種類ごとのフォルダに分類**される（2026-08-09 ユーザー指示）:
-  `input.md`（タスク）は `--out` 直下、`draft_{agent}.md` は `drafts/`、
+  `input.md`（タスク）は `--out` 直下、`knowledge.md`（前提知識。指定時のみ）も `--out` 直下（input/format と並列）、
+  `draft_{agent}.md` は `drafts/`、
   `reconciliation.md`（昇華の下地）/ `elevated.md` / `raw.md` は `artifacts/`、
   `evaluation_*.md` は `evaluations/`。compare は `run_NN/`、improve は `round_NN/` でさらに分離。
   旧レイアウト（フラット）は `python examples/reclassify_output.py <dir>` で新レイアウトに揃えられる。
@@ -181,11 +186,11 @@ for improve, runs/baseline for compare, save_dir.)
 1. Locate the engine repo: `ENGINE_REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"`. Confirm main.py exists there.
 2. Resolve save_dir: if omitted, `examples/<slug of task>/`.
 3. Run main.py for the requested command (run in background if it may exceed 10 minutes):
-   - `elevate`: `python main.py elevate "$TASK" --engine claude-code [--agents ...] --method two-stage --out "$SAVE_DIR"`
-   - `improve`: `python main.py improve "$TASK" --rounds N [--evaluate] --out "$SAVE_DIR"` — 昇華版 → 改修の草案(複数) → 昇華 の反復ループ
-   - `compare`: `python main.py compare "$TASK" --evaluate --runs N [--baseline best-of-n] --out "$SAVE_DIR"` — 素の生成 vs 昇華の実測比較
-   - `synthesize`: `python main.py synthesize "$ENGINE_REPO"/examples/foo/draft_*.md --task "$TASK" --out "$SAVE_DIR"`
-4. Verify the saved files exist and are non-empty (input.md, draft_*.md, reconciliation.md, elevated.md; improve adds progress.md / compare adds measurement.md).
+   - `elevate`: `python main.py elevate "$TASK" --engine claude-code [--agents ...] --method two-stage [--knowledge "$KNOWLEDGE"] --out "$SAVE_DIR"`
+   - `improve`: `python main.py improve "$TASK" --rounds N [--evaluate] [--knowledge "$KNOWLEDGE"] --out "$SAVE_DIR"` — 昇華版 → 改修の草案(複数) → 昇華 の反復ループ
+   - `compare`: `python main.py compare "$TASK" --evaluate --runs N [--baseline best-of-n] [--knowledge "$KNOWLEDGE"] --out "$SAVE_DIR"` — 素の生成 vs 昇華の実測比較
+   - `synthesize`: `python main.py synthesize "$ENGINE_REPO"/examples/foo/draft_*.md --task "$TASK" [--knowledge "$KNOWLEDGE"] --out "$SAVE_DIR"`
+4. Verify the saved files exist and are non-empty (input.md, draft_*.md, reconciliation.md, elevated.md; knowledge.md if knowledge given; improve adds progress.md / compare adds measurement.md).
 5. Report: summarize the elevated artifact — especially the sublation, the third position that no single draft contained (the Aufhebung). For improve, report the overall trajectory across rounds (is improvement visible?); for compare, report the stats (win rate, 95% CI, Cohen's d) and do not overclaim with n<10. Name the save directory.
 
 Rules:
@@ -199,6 +204,7 @@ Rules:
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 2.2.0 | 2026-08-09 | **前提知識の注入**を追加。`--knowledge 'TEXT'` / `--knowledge-file PATH` / `--ask-knowledge`（相互排他）で起動時に前提知識（素材・制約・背景）を指定。diverge（草案）・aufheben（止揚）・finalize（最終化）・generate（単発）の全生成段階にタスク直後として注入し、`--out/knowledge.md` に保存（input.md / format.md と並列）。fmt（形）と対になる内容の制約。extract_format / 5軸評価には注入しない。improve の改修ラウンドに永続・compare は公平（両経路に注入） |
 | 2.1.0 | 2026-08-09 | **出力フォーマット認識**を追加。実API時にタスクから期待される出力形式を LLM が動的に抽出（`extract_format`）し、diverge（草案形式）・finalize（TVRO置換）・完全性ガード（タスク固有の長さ範囲）に注入。キャッチコピーが分析レポートになる根本原因を解消。`--output-format '<JSON>'` で明示指定も可能（mock でも有効）。抽出失敗は既存挙動にフォールバック |
 | 2.0.1 | 2026-08-09 | `improve` に高品位停止を追加（`--quality-ceiling` 既定 0.85）。overall がしきい値以上なら改修ラウンドを生成せず停止（実測: story-plot 0.860→0.520 の過修正を防ぐ）。停止理由は progress.md に記録 |
 | 2.0.0 | 2026-08-08 | 中核機構を「論理的な統合（synthesis）」から「弁証法的昇華（Aufheben）」へ衣替え。DIVERGE は温度0.9で極限まで逸脱し、昇華推理が否定・保存・高次化の三契機で矛盾を包括する枠組みを創出する。DIVERGE → AUFHEBEN → FINALIZE の3段構え（用語変更ではなく機構変更） |

@@ -656,18 +656,32 @@ def _generate_draft(
 
 # ---- プロンプト構築（ステートレス生成器への明示補償） ----
 
+def _knowledge_block(knowledge: str | None) -> list[str]:
+    """前提知識をプロンプトのセクションに整形する（なければ空リスト）。
+
+    前提知識はタスクの直後に置く（fmt の形式指示より前）。これは「形」ではなく
+    「内容」の制約——素材・制約・背景情報——であり、生成の全段階の土台にする。
+    """
+    if not knowledge:
+        return []
+    return [f"【前提知識】\n{knowledge}"]
+
+
 def _drafts_block(drafts: list[Draft]) -> list[str]:
     """各草案を「エージェント名付き」のブロックに整形する。"""
     return [f"【草案（観点: {d.agent}）】\n{d.content}" for d in drafts]
 
 
-def _build_aufheben_prompt(task: str, drafts: list[Draft], fmt: OutputFormat | None = None) -> str:
+def _build_aufheben_prompt(task: str, drafts: list[Draft], fmt: OutputFormat | None = None,
+                           knowledge: str | None = None) -> str:
     """止揚（アウフヘーベン）の user プロンプトを組み立てる。
 
     fmt が渡されたら、最終成果物の形式（deliverable_type）を意識するよう指示を追記する。
     弁証法（否定/保存/高次化/超越的視点）自体は不変。
+    knowledge が渡されたら、前提知識をタスク直後に注入する（止揚が知識の範囲内で行われる）。
     """
     parts = [f"【タスク】\n{task}"] if task else []
+    parts += _knowledge_block(knowledge)
     parts += _drafts_block(drafts)
     instruction = AUFHEBEN_INSTRUCTION
     if fmt is not None and fmt.draft_guidance:
@@ -679,13 +693,16 @@ def _build_aufheben_prompt(task: str, drafts: list[Draft], fmt: OutputFormat | N
     return "\n\n".join(parts)
 
 
-def _build_synthesis_prompt(task: str, drafts: list[Draft], fmt: OutputFormat | None = None) -> str:
+def _build_synthesis_prompt(task: str, drafts: list[Draft], fmt: OutputFormat | None = None,
+                            knowledge: str | None = None) -> str:
     """単発昇華（method="single-pass"）の user プロンプトを組み立てる。
 
     fmt が渡されたら、最終成果物の形式指示（finalize_guidance）を追記して、
     単発昇華もタスク固有の形式で仕上げさせる（TVRO 前提にしない）。
+    knowledge が渡されたら、前提知識をタスク直後に注入する。
     """
     parts = [f"【タスク】\n{task}"] if task else []
+    parts += _knowledge_block(knowledge)
     parts += _drafts_block(drafts)
     instruction = SYNTHESIS_INSTRUCTION
     if fmt is not None and fmt.finalize_guidance:
@@ -697,15 +714,18 @@ def _build_synthesis_prompt(task: str, drafts: list[Draft], fmt: OutputFormat | 
     return "\n\n".join(parts)
 
 
-def _build_finalize_prompt(task: str, reconciliation: str, fmt: OutputFormat | None = None) -> str:
+def _build_finalize_prompt(task: str, reconciliation: str, fmt: OutputFormat | None = None,
+                           knowledge: str | None = None) -> str:
     """最終分析の user プロンプトを組み立てる。
 
     最終化は草案ではなく「止揚（アウフヘーベン）の基盤」だけを読む。止揚の中間過程が
     最終成果物に漏れないよう、高められた結論だけを書かせる。
     fmt が渡されたら、そのフォーマット固有の finalize_guidance で TVRO を置き換える
     （タスクに応じた形式で最終成果物を仕上げさせる）。
+    knowledge が渡されたら、前提知識をタスク直後に注入する（成果物が知識と矛盾しない）。
     """
     parts = [f"【タスク】\n{task}"] if task else []
+    parts += _knowledge_block(knowledge)
     finalize_instruction = fmt.finalize_guidance if (fmt is not None and fmt.finalize_guidance) else FINALIZE_INSTRUCTION
     parts += [
         f"【止揚の基盤】\n{reconciliation}",
@@ -753,7 +773,7 @@ class DraftEngine:
     # ---- 素の生成 ----
 
     def generate(self, task: str, *, sink: Path | None = None,
-                 fmt: OutputFormat | None = None) -> str:
+                 fmt: OutputFormat | None = None, knowledge: str | None = None) -> str:
         """素のAI（単発生成）: 温度 0.0 で成果物を生成する。1 call。
 
         草案と同じ完全性ガード（broken output → regenerate）を適用する——
@@ -763,11 +783,15 @@ class DraftEngine:
         fmt が渡されたら、そのフォーマット固有の最終化指示をタスクに追記する
         （compare の素の生成ベースラインにも同じフォーマットを与えて公平に比較する）。
         完全性判定はフォーマット固有の長さ範囲で行う。
+        knowledge が渡されたら、前提知識をタスク直後に追記する
+        （compare の素の生成ベースラインにも同じ前提知識を与えて公平に比較する）。
         """
         task_for_model = task
+        if knowledge:
+            task_for_model = f"{task_for_model}\n\n【前提知識】\n{knowledge}"
         if fmt is not None and fmt.finalize_guidance:
             task_for_model = (
-                f"{task}\n\n【このタスクの最終成果物形式】\n{fmt.finalize_guidance}"
+                f"{task_for_model}\n\n【このタスクの最終成果物形式】\n{fmt.finalize_guidance}"
             )
         is_complete = (
             (lambda text: _elevated_is_complete(text, fmt)) if fmt is not None
@@ -803,6 +827,7 @@ class DraftEngine:
         draft_dir: Path | None = None,
         on_error: Callable[[str, Exception], None] | None = None,
         fmt: OutputFormat | None = None,
+        knowledge: str | None = None,
     ) -> list[Draft]:
         """指定エージェント（既定は登録済み全エージェント）で独立草案を生成する。
 
@@ -833,6 +858,11 @@ class DraftEngine:
           （空なら既存のテーゼ形式のまま——分析レポート・フォールバック時）
         - 草案上限は output_is_direct（成果物そのもの）なら DRAFT_MAX_LENGTH_CREATIVE、
           それ以外は DRAFT_MAX_LENGTH。fmt が無ければ従来どおり _is_creative_task で判定。
+
+        knowledge（前提知識）が渡されたら、各エージェントの草案タスクにタスク直後
+        （草案形式の指示より前）に注入する。素材・制約・背景情報を生成の土台にする。
+        改修ラウンド（improve/compare の _revision_task）でも diverge が内部で知識を
+        付与するため、ラウンドをまたいで永続する。
         """
         names = agents if agents is not None else list(self._agents)
         unknown = [a for a in names if a not in self._agents]
@@ -843,8 +873,10 @@ class DraftEngine:
         else:
             max_length = DRAFT_MAX_LENGTH_CREATIVE if _is_creative_task(task) else DRAFT_MAX_LENGTH
         draft_task = task
+        if knowledge:
+            draft_task = f"{draft_task}\n\n【前提知識】\n{knowledge}"
         if fmt is not None and fmt.draft_guidance:
-            draft_task = f"{task}\n\n【このタスクの草案形式】\n{fmt.draft_guidance}"
+            draft_task = f"{draft_task}\n\n【このタスクの草案形式】\n{fmt.draft_guidance}"
         drafts: list[Draft] = []
         for name in names:
             sink = None
@@ -874,7 +906,7 @@ class DraftEngine:
         self, drafts: list[Draft], method: str = "two-stage", task: str = "",
         *, enable_logic_check: bool | None = None,
         reconciliation_sink: Path | None = None, artifact_sink: Path | None = None,
-        fmt: OutputFormat | None = None,
+        fmt: OutputFormat | None = None, knowledge: str | None = None,
     ) -> tuple[str, str]:
         """昇華し、止揚（昇華の下地）と成果物を返す。
 
@@ -890,18 +922,20 @@ class DraftEngine:
 
         fmt（OutputFormat）が渡されたら、止揚・最終化・完全性ガードをそのフォーマットに従わせる
         （フォーマット固有の finalize_guidance で TVRO を置換、タスク固有の長さ範囲で判定）。
+        knowledge（前提知識）が渡されたら、止揚・最終化（および単発昇華）のプロンプトに
+        タスク直後として注入する。
         """
         if not drafts:
             raise ValueError("昇華対象の草案がありません")
         if enable_logic_check is None:
             enable_logic_check = self.enable_logic_check
         if method == "two-stage":
-            aufheben_user = _build_aufheben_prompt(task, drafts, fmt)
+            aufheben_user = _build_aufheben_prompt(task, drafts, fmt, knowledge)
             reconciliation = _generate_aufheben(
                 self.client, aufheben_user, temperature=self.draft_temperature,
                 sink=reconciliation_sink,
             )
-            finalize_user = _build_finalize_prompt(task, reconciliation, fmt)
+            finalize_user = _build_finalize_prompt(task, reconciliation, fmt, knowledge)
             artifact = _generate_finalize(
                 self.client, finalize_user, fmt=fmt,
                 sink=None if enable_logic_check else artifact_sink,
@@ -910,7 +944,7 @@ class DraftEngine:
                 artifact = _generate_logic_check(self.client, artifact, task, sink=artifact_sink, fmt=fmt)
             return reconciliation, artifact
         if method == "single-pass":
-            synthesis_user = _build_synthesis_prompt(task, drafts, fmt)
+            synthesis_user = _build_synthesis_prompt(task, drafts, fmt, knowledge)
             artifact = _generate_synthesis(
                 self.client, synthesis_user, fmt=fmt,
                 sink=None if enable_logic_check else artifact_sink,
@@ -923,7 +957,7 @@ class DraftEngine:
     def synthesize(
         self, drafts: list[Draft], method: str = "two-stage", task: str = "",
         *, enable_logic_check: bool | None = None,
-        fmt: OutputFormat | None = None,
+        fmt: OutputFormat | None = None, knowledge: str | None = None,
     ) -> str:
         """複数の独立草案を昇華（アウフヘーベン）して一段高い成果物を返す。
 
@@ -933,9 +967,11 @@ class DraftEngine:
         drafts は外部草案（人間の専門家が書いた分析、別モデルの出力等）でもよい。
         出所を問わず「複数の異なる視点」を突っ込めば一段高い昇華を返す。
         fmt が渡されたら、止揚・最終化・完全性ガードをそのフォーマットに従わせる。
+        knowledge が渡されたら、止揚・最終化のプロンプトに前提知識を注入する。
         """
         _, artifact = self.synthesize_with_reconciliation(
-            drafts, method=method, task=task, enable_logic_check=enable_logic_check, fmt=fmt
+            drafts, method=method, task=task, enable_logic_check=enable_logic_check,
+            fmt=fmt, knowledge=knowledge,
         )
         return artifact
 
@@ -945,13 +981,15 @@ class DraftEngine:
         self, task: str, method: str = "two-stage", agents: list[str] | None = None,
         *, enable_logic_check: bool | None = None,
         on_error: Callable[[str, Exception], None] | None = None,
-        fmt: OutputFormat | None = None,
+        fmt: OutputFormat | None = None, knowledge: str | None = None,
     ) -> str:
         """diverge → synthesize を一気に行う。
 
         fmt が渡されたら、発散の草案形式・止揚・最終化・完全性ガードをそのフォーマットに従わせる。
+        knowledge が渡されたら、発散・止揚・最終化の全段階に前提知識を注入する。
         """
-        drafts = self.diverge(task, agents=agents, on_error=on_error, fmt=fmt)
+        drafts = self.diverge(task, agents=agents, on_error=on_error, fmt=fmt, knowledge=knowledge)
         return self.synthesize(
-            drafts, method=method, task=task, enable_logic_check=enable_logic_check, fmt=fmt
+            drafts, method=method, task=task, enable_logic_check=enable_logic_check,
+            fmt=fmt, knowledge=knowledge,
         )
