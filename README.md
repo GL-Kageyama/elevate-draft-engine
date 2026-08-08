@@ -60,6 +60,10 @@ You are the **Strategist**, a voice of value and markets.
 **生産的衝突**が統合時の掛け算の源泉になる。懐疑・批判は統合段階の reconciler が
 引き受ける（草案同士の矛盾を検出して解決する）。
 
+エージェントは `./install.sh` で Claude Code のサブエージェント（Agent tool / @-mention）
+としても呼べるようになる。ただし**エンジンはサブエージェントを使わない**——
+`agents/*.md` をリポジトリ内から直接読む。オーケストレーションは常に Python エンジン側。
+
 | # | ファイル | 観点 | 着想元 |
 |---|---------|------|--------|
 | 1 | `designer` | 体験設計 | aesthetic-critic |
@@ -127,6 +131,31 @@ wisdom-council-layer の「エージェントは独立したサブエージェ�
 同一ゲートウェイ上で安定して完全出力を返すため、実測 2026-08-08 時点の実用経路である。
 SDK 経由の空応答は `CLAUDE_MAX_RETRIES`（既定6）で再試行する。
 
+## インストールとファサード skill
+
+`./install.sh` で Claude Code から呼べるようにする（wisdom-council と同型）。
+
+```bash
+./install.sh            # グローバル: ~/.claude/agents/ + ~/.claude/skills/
+./install.sh --local    # プロジェクト: .claude/agents/ + .claude/skills/
+./install.sh --uninstall
+```
+
+インストールされるもの:
+- **8クリエイターエージェント**（`strategist` 等）— Agent tool / @-mention で起動可能
+- **`elevate-draft-engine` skill（ファサード）** — `main.py` への薄い呼び出しインターフェース
+
+**ファサード skill の設計**: wisdom-council の skill は**オーケストレーター**（サブエージェントを
+招集・統合する）だが、elevate の skill は**ファサード**である。オーケストレーション
+（DIVERGE → 推理 → 最終化、完全性ガード、温度制御、`claude -p` 安定経路）はすべて
+Python エンジン側にあり、skill は `main.py` を起動して結果を報告するだけ。エンジンを
+バイパスしてサブエージェントを直接統合するのはダウングレードなので行わない。
+
+```bash
+# 呼び出し例（Claude Code 内で Skill: elevate-draft-engine を使用）
+# Args: {"task": "健康AIの企画", "agents": ["strategist", "humanist", "differentiator"]}
+```
+
 ## Python API
 
 ```python
@@ -179,8 +208,11 @@ elevate-draft-engine/
 │   └── claude_code_client.py   # claude -p 独立起動（wisdom-council 方式・--engine claude-code）
 ├── evaluation/
 │   └── evaluator.py            # 5軸評価（自己完結。--evaluate 用）
+├── skills/
+│   └── elevate-draft-engine/SKILL.md   # ファサード skill（main.py を起動。オーケストレーションは委譲）
 ├── tests/                      # 45件（engine 28 / client 6 / evaluator 11）
 ├── examples/                   # 実行サンプル集（wisdom-council 風。input + 各草案 + 成果物）
+├── install.sh                  # agents + skill を Claude Code 検出先へ symlink 設置
 ├── main.py                     # 薄い CLI
 ├── requirements.txt
 └── README.md

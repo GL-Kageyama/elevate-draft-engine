@@ -2,26 +2,26 @@
 #
 # Elevate Draft Engine installer
 #
-# Installs the 8 creator agents to Claude Code agent discovery locations so
-# they are available by name (Agent tool / @-mention), alongside the wisdom
-# council evaluators.
+# Installs the 8 creator agents and the elevate-draft-engine facade skill to
+# Claude Code discovery locations so they are available by name.
 #
 # Usage:
-#   ./install.sh            # Global: ~/.claude/agents/ (callable from any project)
-#   ./install.sh --local    # Project: .claude/agents/ (this repo only)
+#   ./install.sh            # Global: ~/.claude/agents/ + ~/.claude/skills/ (callable from any project)
+#   ./install.sh --local    # Project: .claude/agents/ + .claude/skills/ (this repo only)
 #   ./install.sh --uninstall
 #
-# Installation uses symlinks: the canonical source stays in ./agents/, so
-# edits to the repo are reflected immediately.
+# Installation uses symlinks: the canonical source stays in ./agents/ and
+# ./skills/, so edits to the repo are reflected immediately.
 #
 # Note: the engine (main.py) reads ./agents/*.md directly and needs no
-# installation. This script only makes the creator agents callable as
-# Claude Code subagents (Agent tool / @-mention).
+# installation. The agents + skill are only for calling them from Claude Code:
+# the skill is a facade that invokes main.py (orchestration stays in Python).
 
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENTS_DIR="$REPO_DIR/agents"
+SKILLS_DIR="$REPO_DIR/skills"
 
 MODE="global"
 ACTION="install"
@@ -36,7 +36,7 @@ while [[ $# -gt 0 ]]; do
       echo ""
       echo "  --local      Install to .claude/ (this project only)"
       echo "  --global     Install to ~/.claude/ (default; callable from anywhere)"
-      echo "  --uninstall  Remove the installed agents (default: global target)"
+      echo "  --uninstall  Remove the installed agents and skills (default: global target)"
       exit 0
       ;;
     *) echo "Unknown option: $1"; exit 1 ;;
@@ -46,14 +46,18 @@ done
 
 if [[ "$MODE" == "local" ]]; then
   TARGET_AGENTS_DIR="$REPO_DIR/.claude/agents"
+  TARGET_SKILLS_DIR="$REPO_DIR/.claude/skills"
 else
   TARGET_AGENTS_DIR="$HOME/.claude/agents"
+  TARGET_SKILLS_DIR="$HOME/.claude/skills"
 fi
 
 if [[ "$ACTION" == "uninstall" ]]; then
-  echo "==> Uninstalling Elevate Draft Engine agents from:"
+  echo "==> Uninstalling Elevate Draft Engine agents/skills from:"
   echo "    $TARGET_AGENTS_DIR"
+  echo "    $TARGET_SKILLS_DIR"
   removed=0
+  # agents
   for agent_file in "$AGENTS_DIR"/*.md; do
     name="$(basename "$agent_file")"
     if [[ -L "$TARGET_AGENTS_DIR/$name" || -e "$TARGET_AGENTS_DIR/$name" ]]; then
@@ -62,13 +66,23 @@ if [[ "$ACTION" == "uninstall" ]]; then
       removed=$((removed+1))
     fi
   done
-  echo "==> Removed $removed agent(s)."
+  # skills
+  for skill_dir in "$SKILLS_DIR"/*/; do
+    name="$(basename "$skill_dir")"
+    if [[ -L "$TARGET_SKILLS_DIR/$name" || -e "$TARGET_SKILLS_DIR/$name" ]]; then
+      rm -rf "$TARGET_SKILLS_DIR/$name"
+      echo "    ✓ removed skill $name"
+      removed=$((removed+1))
+    fi
+  done
+  echo "==> Removed $removed component(s)."
   exit 0
 fi
 
-echo "==> Installing Elevate Draft Engine agents to:"
+echo "==> Installing Elevate Draft Engine to:"
 echo "    agents: $TARGET_AGENTS_DIR"
-mkdir -p "$TARGET_AGENTS_DIR"
+echo "    skills: $TARGET_SKILLS_DIR"
+mkdir -p "$TARGET_AGENTS_DIR" "$TARGET_SKILLS_DIR"
 
 installed=0
 
@@ -82,6 +96,16 @@ for agent_file in "$AGENTS_DIR"/*.md; do
   echo "    ✓ agent  $name"
 done
 
+# Install the facade skill
+for skill_dir in "$SKILLS_DIR"/*/; do
+  name="$(basename "$skill_dir")"
+  target="$TARGET_SKILLS_DIR/$name"
+  rm -rf "$target"
+  ln -s "$skill_dir" "$target"
+  installed=$((installed+1))
+  echo "    ✓ skill $name"
+done
+
 # Verify every symlink resolves to a readable file
 failures=0
 for target in "$TARGET_AGENTS_DIR"/*.md; do
@@ -92,18 +116,27 @@ for target in "$TARGET_AGENTS_DIR"/*.md; do
     failures=$((failures+1))
   fi
 done
+for target in "$TARGET_SKILLS_DIR"/*/; do
+  if [[ -f "$target/SKILL.md" ]]; then
+    :
+  else
+    echo "    ✗ broken: $target"
+    failures=$((failures+1))
+  fi
+done
 
 echo ""
 if [[ $failures -gt 0 ]]; then
-  echo "==> $installed installed, $failures broken symlink(s). Check $AGENTS_DIR."
+  echo "==> $installed installed, $failures broken symlink(s). Check $AGENTS_DIR and $SKILLS_DIR."
   exit 1
 fi
 
-echo "==> Done: $installed agents installed."
+echo "==> Done: $installed components installed."
 echo ""
 echo "    Callable as follows:"
-echo "      Agent: strategist, differentiator, humanist, ...   # クリエイターエージェント"
+echo "      Skill: elevate-draft-engine       # ファサード（main.py を起動）"
+echo "      Agent: strategist, humanist, ...  # クリエイターエージェント（サブエージェントとして起動可）"
 echo ""
 echo "    Note: the engine (main.py) reads ./agents/*.md directly —"
-echo "          this installation only makes them callable as Claude Code subagents."
-echo "    Note: restart Claude Code or run /agents once to reload the listing."
+echo "          the agents/skill installation only makes them callable from Claude Code."
+echo "    Note: restart Claude Code or run /agents and /skills once to reload the listing."
