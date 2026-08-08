@@ -244,6 +244,32 @@ def test_compare_single_run_out_flat(tmp_path) -> None:
     assert not list(tmp_path.glob("run_*")), "--runs 1 で run_* フォルダを作らない"
 
 
+def test_compare_runs_cumulative_from_second_run(tmp_path) -> None:
+    """run_02 以降は累積モード: 前回の昇華版を改修する草案（改訂草案）を書く。
+
+    ユーザー指示（2026-08-09）: 「run-2以降のinputに前段の結果を含めるべきでは？それも
+    踏まえて改訂草案を出して」。run_01 の草案はオリジナルタスクからの発散だが、
+    run_02 の草案には前回の昇華版が【改修対象】として埋め込まれ、改修草案のマーカー
+    （MockGenerator が改修度1を埋め込む）が現れる。
+    """
+    code, _ = _run_compare(
+        ["compare", "タスク", "--mock", "--evaluate", "--runs", "2", "--out", str(tmp_path)]
+    )
+    assert code == 0
+    assert "累積モード" in (tmp_path / "measurement.md").read_text()
+
+    run_01_drafts = "".join(
+        p.read_text() for p in (tmp_path / "run_01").glob("draft_*.md")
+    )
+    run_02_drafts = "".join(
+        p.read_text() for p in (tmp_path / "run_02").glob("draft_*.md")
+    )
+    # run_01 は改修なし（オリジナルタスクから発散）→ 改修マーカーが無い
+    assert "改修草案" not in run_01_drafts
+    # run_02 は前回の昇華版を改修する草案 → 改修マーカー（改修度1）が現れる
+    assert "改修草案（改修度1）" in run_02_drafts
+
+
 # ---- 統計報告の強化（信頼区間・効果量・保存率） ----
 
 def test_compare_runs_reports_confidence_intervals(tmp_path) -> None:

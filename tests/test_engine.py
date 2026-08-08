@@ -57,8 +57,17 @@ class MockGenerator:
                 "否定・保存・高次化の三契機を経て、この昇華は単一観点の草案にはない解を構成する。"
             )
         return (
-            "完全な分析である。Target は明確、Value は実現可能、Risk は具体的な対策つき、"
-            "Opportunity は拡張性を持つ。以上が結論である。"
+            "これは与えられたタスクに対する完全な分析である。"
+            "対象の本質は単一の観点では捉えきれず、複数の視点を弁証法的に止揚する"
+            "統合的枠組みが必須であることを示す。"
+            "第一に、価値の最大化と実現可能性の担保は両立しうる。"
+            "第二に、共感と独自性は対立ではなく、相互に補強する。"
+            "第三に、実装上のリスクは具体的な対策により管理可能である。"
+            "第四に、この統合的視座は元のどの草案にも存在しなかった超越的な解であり、"
+            "各観点の固有の真理を保存しながらその一面性だけを否定する。"
+            "第五に、この止揚は単なる折衷ではなく、各観点の極端さを起点に一段高い次元を開く。"
+            "なお、この結論は単一観点の草案には決して到達できない止揚の成果である。"
+            "以上を踏まえ、実行への手がかりを伴う結論を提示した。"
         )
 
 
@@ -66,6 +75,8 @@ class FlakyGenerator:
     """最初の n_broken 回だけ不完全応答を返すモック（完全性ガードの検証用）。
 
     broken は「推理（長さ<60）にも最終化（終端記号なし）にも不合格」な文字列。
+    complete は最終成果物のサイズ制約（ELEVATED_MIN_LENGTH=300〜MAX=1500）を
+    満たす文である（最終化・単発昇華もこの文で合格する）。
     """
 
     def __init__(self, n_broken: int) -> None:
@@ -77,8 +88,16 @@ class FlakyGenerator:
         if self.calls <= self.n_broken:
             return "途中で打ち切られた不十分な応答"
         return (
-            "完全な分析である。Target は明確、Value は実現可能、Risk は具体的な対策つき、"
-            "Opportunity は拡張性を持つ。以上が結論である。"
+            "これは与えられたタスクに対する完全な分析である。Target は明確、Value は実現可能、"
+            "Risk は具体的な対策つき、Opportunity は拡張性を持つ。"
+            "本結論は複数の観点を止揚する統合的枠組みであり、価値の最大化と実現可能性の担保、"
+            "共感と独自性が相互に補強し合う構造を持つ。"
+            "第一に、対立する観点は矛盾ではなく、一段高い次元で両立しうる。"
+            "第二に、各観点の固有の真理を保存しながら、その一面性だけを否定するのが昇華の要諦である。"
+            "第三に、この統合的視座は元のどの草案にも存在しなかった超越的な解を提示し、"
+            "実行への手がかりを伴う具体的な結論を構成する。"
+            "この結論は単一観点の草案には決して到達できない止揚の成果である。"
+            "以上が到達した結論である。"
         )
 
 
@@ -272,6 +291,66 @@ def test_diverge_on_draft_fires_per_generated_draft() -> None:
     assert [d.agent for d in drafts] == seen
 
 
+class _DraftFailsFirstAgentGenerator:
+    """最初のエージェントの草案だけを上限超過で失敗させるモック（後のエージェントは成功）。
+
+    上限超過（DRAFT_MAX_LENGTH+1 字）を返し続けるため、完全性ガードが3回で諦めて
+    RuntimeError を上げる——diverge の per-agent エラー捕捉を検証するためのモック。
+    """
+
+    def __init__(self, n_fail: int) -> None:
+        self.n_fail = n_fail
+        self.calls = 0
+
+    def generate(self, system: str, user: str, *, temperature: float | None = None, on_chunk=None) -> str:
+        from elevate.engine import DRAFT_MAX_LENGTH
+
+        self.calls += 1
+        if self.calls <= self.n_fail:
+            return "あ" * (DRAFT_MAX_LENGTH + 1) + "。"  # 上限超過 → 不完全 → 再生成が続く
+        text = "成功した草案である。"
+        if on_chunk is not None:
+            on_chunk(text)  # SDK アダプタ同様、全文を1回で流す（ストリーム保存用）
+        return text
+
+
+def test_diverge_skips_failed_agent_and_reports(tmp_path) -> None:
+    """単一エージェントの草案が上限回数で失敗しても、残りで継続し失敗を報告する。
+
+    実測 2026-08-09: 歌詞の草案が DRAFT_MAX_LENGTH 超過を繰り返し RuntimeError になり、
+    行列（compare/improve）全体が落ちた。diverge は失敗エージェントだけスキップし、
+    on_error で報告する（行列を落とさない「報告して継続」）。
+    """
+    client = _DraftFailsFirstAgentGenerator(n_fail=3)  # 最初の agent の3試行（AUFHEBEN_MAX_ATTEMPTS）
+    engine = DraftEngine(client)
+    failures: list[tuple[str, Exception]] = []
+    drafts = engine.diverge(
+        "タスク", agents=["strategist", "humanist"], draft_dir=tmp_path,
+        on_error=lambda name, exc: failures.append((name, exc)),
+    )
+    # 失敗した strategist は含まれず、humanist だけで続行する
+    assert [d.agent for d in drafts] == ["humanist"]
+    assert len(failures) == 1
+    assert failures[0][0] == "strategist"
+    assert isinstance(failures[0][1], RuntimeError)
+    # 失敗エージェントの部分草案ファイルは残さない（成功した分だけが残る）
+    assert not (tmp_path / "draft_strategist.md").exists()
+    assert (tmp_path / "draft_humanist.md").read_text() == "成功した草案である。"
+
+
+def test_diverge_all_agents_failed_returns_empty(tmp_path) -> None:
+    """全エージェントが失敗したら空リストを返す（synthesize 側が「草案がありません」で失敗）。"""
+    client = _DraftFailsFirstAgentGenerator(n_fail=100)  # どの agent も失敗し続ける
+    engine = DraftEngine(client)
+    failures: list[tuple[str, Exception]] = []
+    drafts = engine.diverge(
+        "タスク", agents=["strategist", "humanist"], draft_dir=tmp_path,
+        on_error=lambda name, exc: failures.append((name, exc)),
+    )
+    assert drafts == []
+    assert [n for n, _ in failures] == ["strategist", "humanist"]
+
+
 # ---- ストリーム草案保存（draft_dir: 空ファイル先作成 + 逐次追記） ----
 
 class _StreamingMockGenerator:
@@ -356,10 +435,18 @@ def test_synthesize_streams_reconciliation_and_artifact_to_sink(tmp_path) -> Non
 
     草案のストリーム保存を draft 以外の生成成果物へ横展開したもの。
     """
-    # 昇華推理は長さ下限（AUFHEBEN_MIN_LENGTH=60）を満たす必要があるため長めの文を使う
+    # 昇華推理は長さ下限（AUFHEBEN_MIN_LENGTH=60）を、最終成果物（elevated）は
+    # サイズ制約（ELEVATED_MIN_LENGTH=300〜MAX=1500）を満たす必要があるため長めの文を使う
     chunks = [
-        "昇華推理の結論は「両草案の対立を否定・保存・高次化する一段高い枠組み」であり、",
-        "単一観点では決して到達できない解を構成する。",
+        "昇華推理の結論は「両草案の対立を否定・保存・高次化する一段高い枠組み」であり、"
+        "単一観点では決して到達できない統合的視座を構成する。第一に、価値の最大化と"
+        "実現可能性の担保は両立しうる。第二に、共感と独自性は対立ではなく相互に補強する。"
+        "第三に、実装上のリスクは具体的な対策により管理可能である。第四に、この止揚は"
+        "単なる折衷ではなく、各観点の極端さを起点に一段高い次元を開く。第五に、矛盾する"
+        "真理を同時に成立させる枠組みは、元のどの草案にも存在しなかった超越的な解を提示し、"
+        "各観点の固有の真理を保存しながらその一面性だけを否定する。"
+        "この結論は単一観点の草案には決して到達できない止揚の成果であり、"
+        "実行への手がかりを伴う統合的視座を示している。以上が到達した結論である。",
     ]
     client = _StreamingMockGenerator(chunks)
     client.first_chunk_sink = tmp_path / "reconciliation.md"
@@ -491,12 +578,24 @@ def test_diverge_regenerates_when_draft_truncated() -> None:
     assert all(d.content for d in drafts)
 
 
-def test_diverge_raises_after_max_attempts() -> None:
-    """草案が上限回数で直らない場合は明示的失敗（打ち切り草案を渡さない）。"""
+def test_diverge_reports_failure_without_passing_broken_draft() -> None:
+    """草案が上限回数で直らない場合、打ち切り草案を下流へ渡さない。
+
+    2026-08-09 仕様変更: diverge は単一エージェントの失敗で RuntimeError を投げず、
+    on_error に報告してスキップする（行列を落とさない「報告して継続」）。
+    失敗した草案は戻り値に含めないので、昇華に打ち切り草案が渡らない。
+    """
     client = FlakyGenerator(n_broken=100)
     engine = DraftEngine(client)
-    with pytest.raises(RuntimeError, match="草案生成"):
-        engine.diverge("タスク", agents=["strategist"])
+    failures: list[tuple[str, Exception]] = []
+    drafts = engine.diverge(
+        "タスク", agents=["strategist"],
+        on_error=lambda name, exc: failures.append((name, exc)),
+    )
+    assert drafts == []  # 打ち切り草案は下流に渡らない
+    assert len(failures) == 1
+    assert failures[0][0] == "strategist"
+    assert isinstance(failures[0][1], RuntimeError)
 
 
 def test_draft_complete_allows_markdown_closing() -> None:
@@ -521,8 +620,127 @@ def test_draft_over_max_length_is_incomplete() -> None:
     assert not _draft_is_complete(long)
 
 
+def test_is_creative_task_detection() -> None:
+    """創作系タスク判定: 歌詞・小説・コピー等は真、散文の分析タスクは偽。"""
+    from elevate.engine import _is_creative_task
+
+    # 創作系（作品の完成形が長くなりうるジャンル）→ 上限緩和の対象
+    assert _is_creative_task("「雨上がりの電話」というタイトルの歌謡曲の歌詞を書け")
+    assert _is_creative_task("無人駅を舞台にした短編小説のプロットを構想せよ")
+    assert _is_creative_task("リサイクル素材のスニーカー『Maru』のキャッチコピーを開発せよ")
+    assert _is_creative_task("戦争のない世界についての詩を書け")
+    assert _is_creative_task("亡霊と同居する物語の脚本を執筆せよ")
+
+    # 非創作系（散文の分析・設計タスク）→ 既定の1000字上限のまま
+    assert not _is_creative_task("ミニマリスト向け家計簿アプリ「Rei」の事業計画を設計せよ")
+    assert not _is_creative_task("深層学習の解釈可能性に関する新しい科学仮説を提案せよ")
+    assert not _is_creative_task("大学生向けの新しいアプリサービスのコンセプトを設計せよ")
+    assert not _is_creative_task("資料のコピーを社内に配布する運用フローを策定せよ")
+
+
+def test_draft_is_complete_respects_custom_max_length() -> None:
+    """完全性判定の max_length を差し替えられる（創作系で上限を緩める経路）。"""
+    from elevate import DRAFT_MAX_LENGTH_CREATIVE as _pkg_creative  # __init__ からの再輸出も確認
+    from elevate.engine import DRAFT_MAX_LENGTH, DRAFT_MAX_LENGTH_CREATIVE, _draft_is_complete
+
+    assert _pkg_creative == DRAFT_MAX_LENGTH_CREATIVE
+
+    # 1000字を超えるが3000字未満の草案（実測の歌詞1116字に相当）
+    over_default = "あ" * (DRAFT_MAX_LENGTH + 1) + "。"
+    assert not _draft_is_complete(over_default)  # 既定上限では超過 → 不完全
+    assert _draft_is_complete(over_default, max_length=DRAFT_MAX_LENGTH_CREATIVE)
+
+    # 創作系上限すら超えたら、創作系でも不完全のまま
+    at_creative_max = "あ" * (DRAFT_MAX_LENGTH_CREATIVE + 1) + "。"
+    assert not _draft_is_complete(at_creative_max, max_length=DRAFT_MAX_LENGTH_CREATIVE)
+
+
+class _LongDraftGenerator:
+    """常に DRAFT_MAX_LENGTH 超・DRAFT_MAX_LENGTH_CREATIVE 未満の草案を返すモック。
+
+    創作系タスクでは上限が緩むため成功するが、散文タスクでは上限超過で失敗する
+    （diverge がタスク種別で max_length を切り替える経路の検証用）。
+    """
+
+    def __init__(self, length: int) -> None:
+        self.text = "あ" * length + "。"
+
+    def generate(self, system: str, user: str, *, temperature: float | None = None, on_chunk=None) -> str:
+        if on_chunk is not None:
+            on_chunk(self.text)  # SDK アダプタ同様、全文を1回で流す（ストリーム保存用）
+        return self.text
+
+
+def test_diverge_relaxes_cap_for_creative_task(tmp_path) -> None:
+    """創作系タスク（歌詞等）は草案上限が DRAFT_MAX_LENGTH_CREATIVE に緩む。
+
+    実測 2026-08-09: 歌詞の草案1116字が DRAFT_MAX_LENGTH=1000 を超えて3回失敗し行列が落ちた。
+    同サイズの草案でも、歌詞タスクなら成功し、散文タスクなら失敗（スキップ）する。
+    """
+    from elevate.engine import DRAFT_MAX_LENGTH, DRAFT_MAX_LENGTH_CREATIVE, DraftEngine
+
+    # 1000 字を超えるが 3000 字未満の草案（実測の1116字に相当）
+    assert DRAFT_MAX_LENGTH < 1116 < DRAFT_MAX_LENGTH_CREATIVE
+
+    # 歌詞（創作系）→ 上限緩和で成功する
+    creative_client = _LongDraftGenerator(1116)
+    creative_engine = DraftEngine(creative_client)
+    creative_failures: list[str] = []
+    creative_drafts = creative_engine.diverge(
+        "「雨上がりの電話」というタイトルの歌謡曲の歌詞を書け",
+        agents=["storyteller"],
+        draft_dir=tmp_path / "creative",
+        on_error=lambda name, exc: creative_failures.append(name),
+    )
+    assert [d.agent for d in creative_drafts] == ["storyteller"]
+    assert creative_failures == []
+    assert len(creative_drafts[0].content) == 1116 + 1  # 本体 + 終端記号
+    assert (tmp_path / "creative" / "draft_storyteller.md").read_text() == creative_drafts[0].content
+
+    # 散文（非創作系）→ 上限が1000のままなので失敗しスキップされる
+    plain_client = _LongDraftGenerator(1116)
+    plain_engine = DraftEngine(plain_client)
+    plain_failures: list[str] = []
+    plain_drafts = plain_engine.diverge(
+        "ミニマリスト向け家計簿アプリ「Rei」の事業計画を設計せよ",
+        agents=["strategist"],
+        draft_dir=tmp_path / "plain",
+        on_error=lambda name, exc: plain_failures.append(name),
+    )
+    assert plain_drafts == []
+    assert plain_failures == ["strategist"]
+    assert not (tmp_path / "plain" / "draft_strategist.md").exists()
+
+
+def test_elevated_is_complete_bounds() -> None:
+    """最終成果物（elevated）のサイズ制約: 上限（コンパクト）と下限（結論としての分量）。"""
+    from elevate.engine import ELEVATED_MAX_LENGTH, ELEVATED_MIN_LENGTH, _elevated_is_complete
+
+    # 下限以上・上限以下・終端記号で終わる → 完全
+    valid = "これは結論として十分な分量を持つ文章である。" + "あ" * ELEVATED_MIN_LENGTH + "。"
+    assert len(valid) >= ELEVATED_MIN_LENGTH
+    assert _elevated_is_complete(valid)
+    # 上限ちょうどまでなら完全
+    exact_max = "あ" * (ELEVATED_MAX_LENGTH - 1) + "。"
+    assert len(exact_max) == ELEVATED_MAX_LENGTH
+    assert _elevated_is_complete(exact_max)
+
+    # 下限未満は不完全（結論としての分量不足 → 再生成）
+    too_short = "結論である。"
+    assert len(too_short) < ELEVATED_MIN_LENGTH
+    assert not _elevated_is_complete(too_short)
+    # 上限超過は不完全（報告書化・過剰包摂 → 再生成）
+    too_long = "あ" * ELEVATED_MAX_LENGTH + "。"
+    assert not _elevated_is_complete(too_long)
+    # 空は不完全
+    assert not _elevated_is_complete("")
+    # 分量は足りていても終端記号なしは不完全
+    no_terminal = "あ" * (ELEVATED_MIN_LENGTH + 10)
+    assert not _elevated_is_complete(no_terminal)
+
+
 def test_reconciliation_regenerates_when_too_short() -> None:
-    """推理が30字未満（推理放棄）なら再生成する。"""
+    """推理が下限未満（推理放棄）なら再生成する。"""
     client = FlakyGenerator(n_broken=1)
     engine = DraftEngine(client)
     out = engine.synthesize(_draft_pair())

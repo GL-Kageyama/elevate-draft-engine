@@ -170,6 +170,7 @@ FINALIZE_SYSTEM = (
     "経緯説明）は含めず、高められた結論だけを整理して記述してください。"
     "分析は具体的・整合的・実行可能でありながら、元のどの草案にもなかった"
     "超越的な統合として提示すること。"
+    "結論はコンパクトにまとめよ（概ね500〜1000字）。要点に絞って簡潔に書くこと。"
 )
 
 FINALIZE_INSTRUCTION = (
@@ -246,6 +247,35 @@ DRAFT_TEMPERATURE = 0.9
 # 超過は不完全扱いにする（分析レポート化による昇華の過剰包摂・速度悪化を防ぐ回収ライン）。
 DRAFT_MAX_LENGTH = 1000
 
+# 創作系タスク（歌詞・小説・物語・コピー等）向けの草案上限（2026-08-09、ユーザー指示）。
+# テーゼ集中の1000字は散文の分析レポート防止用だが、歌詞や小説では完成作品が1000字を
+# 自然に超える（実測: 歌詞1116字が上限超過で3回失敗し行列を落とした）。創作系は上限を
+# 緩めるが、旧12〜19KBの報告書化を防ぐため無制限にはしない（緩めすぎると回帰する）。
+DRAFT_MAX_LENGTH_CREATIVE = 3000
+
+# 創作系タスクの判定キーワード。作品の完成形が長くなりうるジャンルを列挙する。
+# 誤判定のコストは「ガードが緩くなるだけ」（500〜800字指示自体はエージェント側にある）ため、
+# 広めに取る。裸の「コピー」は除外（「資料のコピー」等の誤爆を避ける。キャッチコピーで十分）。
+_CREATIVE_TASK_KEYWORDS = (
+    "歌詞", "歌", "曲", "小説", "物語", "詩", "ポエム", "脚本", "演劇", "絵本",
+    "キャッチコピー", "ストーリー", "プロット", "短編",
+)
+
+
+def _is_creative_task(task: str) -> bool:
+    """創作系タスクか（歌詞・小説・物語・コピー等、作品が長くなりうるジャンル）を判定する。
+
+    真なら草案上限を DRAFT_MAX_LENGTH_CREATIVE に緩める（散文のテーゼ集中上限とは別枠）。
+    """
+    return any(k in task for k in _CREATIVE_TASK_KEYWORDS)
+
+# 最終成果物（elevated）のサイズ制約。草案のテーゼ集中化と同じく、結論もコンパクトで
+# なければならない（実測: 草案が500〜800字に収まっても elevated が7000字級のまま残る）。
+# 上限は報告書化の防止（過剰包摂・検証不能な膨張）。下限は結論としての分量保証——
+# 「結論なので小さすぎもNG」（ユーザー指示 2026-08-09）。上限・下限とも不完全扱いで再生成する。
+ELEVATED_MAX_LENGTH = 1500
+ELEVATED_MIN_LENGTH = 300
+
 # ---- 打ち切りガード（崩れたら再生成） ----
 _SYNTHESIS_TERMINAL_MARKERS = ("。", "！", "？", "…", "」", "）", "}", ")", '"', ".", "!", "?")
 
@@ -297,20 +327,44 @@ def _aufheben_is_complete(text: str) -> bool:
     return bool(text) and len(text.strip()) >= AUFHEBEN_MIN_LENGTH
 
 
-def _draft_is_complete(text: str) -> bool:
+def _draft_is_complete(text: str, max_length: int = DRAFT_MAX_LENGTH) -> bool:
     """草案の完全性判定。文途中で切れた打ち切りと、出力量過多を再生成対象にする。
 
     草案は昇華段階（Aufheben）に渡す先鋭化したテーゼ（テーゼ集中形式・500〜800字）で、
     途中で切れると内容が欠落するため終端記号で判定する（2026-08-08 実測: ゲートウェイが
     "…横のつながりが強い。「この健保" で打ち切った草案を素通ししていた）。末尾のマーク
     ダウン装飾（** の閉じ等）は除いて判定する（claude -p 経由の草案が "…。**" で終わる
-    ことがある）。DRAFT_MAX_LENGTH 超過は「分析レポート化」として不完全扱い——草案は
+    ことがある）。max_length 超過は「分析レポート化」として不完全扱い——草案は
     完全分析ではなくテーゼである（過剰包摂・速度悪化の回収ライン）。
+
+    max_length は創作系タスク（歌詞・小説・コピー等）では DRAFT_MAX_LENGTH_CREATIVE に
+    緩められる。テーゼ集中の1000字は散文の分析レポート防止用で、作品の完成形が
+    1000字を自然に超えるジャンルには効かせない（実測 2026-08-09: 歌詞1116字が上限超過）。
     """
     if not text:
         return False
-    if len(text) > DRAFT_MAX_LENGTH:
+    if len(text) > max_length:
         return False  # 出力量過多（草案はテーゼ集中形式で短くなければならない）
+    stripped = text.rstrip("*`~\t\n ")
+    return stripped.endswith(_SYNTHESIS_TERMINAL_MARKERS)
+
+
+def _elevated_is_complete(text: str) -> bool:
+    """最終成果物（elevated）の完全性判定。文終端＋上限（コンパクト制約）＋下限（結論としての分量）。
+
+    草案のテーゼ集中化（DRAFT_MAX_LENGTH）と同じく、最終成果物も報告書化してはならない
+    （実測: 草案が500〜800字に収まっても、elevated は7000字級のまま残った——昇華が
+    過剰包摂して検証不能な数字を捏造し utility を落とす）。上限 ELEVATED_MAX_LENGTH 超過は
+    「報告書化」として不完全扱い。ただし最終成果物は結論であるため、小さすぎも
+    不合格（ELEVATED_MIN_LENGTH 未満は結論としての分量不足。2026-08-09 ユーザー指示）。
+    両者とも _generate_with_completeness_guard により再生成対象になる。
+    """
+    if not text:
+        return False
+    if len(text) > ELEVATED_MAX_LENGTH:
+        return False  # 出力量過多（結論はコンパクトでなければならない）
+    if len(text) < ELEVATED_MIN_LENGTH:
+        return False  # 分量不足（結論としての最低限を欠く）
     stripped = text.rstrip("*`~\t\n ")
     return stripped.endswith(_SYNTHESIS_TERMINAL_MARKERS)
 
@@ -369,7 +423,7 @@ def _generate_synthesis(generator: Generator, synthesis_user: str, *, sink: Path
     """
     return _generate_with_completeness_guard(
         generator, ANALYSIS_SYSTEM + SYNTHESIS_SYSTEM, synthesis_user, label="昇華生成",
-        sink=sink,
+        is_complete=_elevated_is_complete, sink=sink,
     )
 
 
@@ -395,7 +449,7 @@ def _generate_finalize(generator: Generator, finalize_user: str, *, sink: Path |
     """
     return _generate_with_completeness_guard(
         generator, ANALYSIS_SYSTEM + FINALIZE_SYSTEM, finalize_user, label="最終分析",
-        sink=sink,
+        is_complete=_elevated_is_complete, sink=sink,
     )
 
 
@@ -416,21 +470,23 @@ def _generate_logic_check(generator: Generator, artifact: str, task: str, *, sin
     user = "\n\n".join(parts)
     return _generate_with_completeness_guard(
         generator, ANALYSIS_SYSTEM + LOGIC_CHECK_SYSTEM, user, label="論理検査",
-        sink=sink,
+        is_complete=_elevated_is_complete, sink=sink,
     )
 
 
 def _generate_draft(
-    generator: Generator, system: str, user: str, *, temperature: float, sink: Path | None = None
+    generator: Generator, system: str, user: str, *, temperature: float,
+    sink: Path | None = None, max_length: int = DRAFT_MAX_LENGTH,
 ) -> str:
     """エージェント草案を生成する。文途中の打ち切りは再生成。温度は draft_temperature。
 
     昇華・最終化と同じ完全性ガード（broken output → regenerate）を草案にも適用する。
     sink が与えられたら、生成前に空ファイルを作り、生成中に逐次追記する。
+    max_length で草案上限を差し替えられる（創作系タスクは DRAFT_MAX_LENGTH_CREATIVE）。
     """
     return _generate_with_completeness_guard(
         generator, system, user, temperature=temperature, label="草案生成",
-        is_complete=_draft_is_complete, sink=sink,
+        is_complete=lambda text: _draft_is_complete(text, max_length), sink=sink,
     )
 
 
@@ -544,6 +600,7 @@ class DraftEngine:
         agents: list[str] | None = None,
         on_draft=None,
         draft_dir: Path | None = None,
+        on_error: Callable[[str, Exception], None] | None = None,
     ) -> list[Draft]:
         """指定エージェント（既定は登録済み全エージェント）で独立草案を生成する。
 
@@ -555,20 +612,42 @@ class DraftEngine:
         draft_dir を渡すと、各草案は生成前に空の draft_{name}.md として作成され、
         生成中に逐次追記される（claude-code エンジンのストリーム対応クライアントで
         実際に逐次追記される。未対応クライアントでは生成完了時に一括書き込み）。
+
+        on_error(name, exc) を渡すと、単一エージェントの草案が上限回数連続で打ち切り/不完全
+        （RuntimeError）になったとき、そのエージェントだけスキップして残りで継続する。
+        1エージェントの失敗で呼び出し全体を中断しない（実測 2026-08-09: 歌詞の草案が
+        DRAFT_MAX_LENGTH 超過を繰り返し、行列 compare/improve 全体が落ちた）。
+        失敗したエージェントの部分草案ファイルは残さない（成功草案と区別するため削除）。
+        全エージェントが失敗した場合は空リストを返し、呼び出し側の synthesize が
+        「草案がありません」で明確に失敗する。
+
+        創作系タスク（歌詞・小説・コピー等）は草案上限を DRAFT_MAX_LENGTH_CREATIVE に
+        緩める（2026-08-09、ユーザー指示）。テーゼ集中の1000字は散文の分析レポート防止用で、
+        作品の完成形が長くなりうるジャンルでは、超過が失敗になるのは誤作動だった。
+        判定は _is_creative_task のキーワード法。誤判定のコストはガードが緩くなるだけ。
         """
         names = agents if agents is not None else list(self._agents)
         unknown = [a for a in names if a not in self._agents]
         if unknown:
             raise ValueError(f"未登録のエージェント: {unknown}（登録済み: {list(self._agents)}）")
+        max_length = DRAFT_MAX_LENGTH_CREATIVE if _is_creative_task(task) else DRAFT_MAX_LENGTH
         drafts: list[Draft] = []
         for name in names:
             sink = None
             if draft_dir is not None:
                 sink = draft_dir / f"draft_{name}.md"
-            content = _generate_draft(
-                self.client, self._agents[name], task,
-                temperature=self.draft_temperature, sink=sink,
-            )
+            try:
+                content = _generate_draft(
+                    self.client, self._agents[name], task,
+                    temperature=self.draft_temperature, sink=sink, max_length=max_length,
+                )
+            except RuntimeError as exc:
+                # 単一エージェントの生成失敗: 部分草案を残さず報告して、次のエージェントへ
+                if sink is not None and sink.exists():
+                    sink.unlink()
+                if on_error is not None:
+                    on_error(name, exc)
+                continue
             draft = Draft(agent=name, content=content)
             drafts.append(draft)
             if on_draft is not None:
@@ -645,9 +724,10 @@ class DraftEngine:
     def elevate(
         self, task: str, method: str = "two-stage", agents: list[str] | None = None,
         *, enable_logic_check: bool | None = None,
+        on_error: Callable[[str, Exception], None] | None = None,
     ) -> str:
         """diverge → synthesize を一気に行う。"""
-        drafts = self.diverge(task, agents=agents)
+        drafts = self.diverge(task, agents=agents, on_error=on_error)
         return self.synthesize(
             drafts, method=method, task=task, enable_logic_check=enable_logic_check
         )

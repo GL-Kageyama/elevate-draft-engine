@@ -168,12 +168,22 @@ class MockGenerator:
             )
             text += _mock_revision_marker(user)
         # それ以外（素の生成・単発昇華・Aufheben が system に無い実測・最終化）:
-        # 文終端記号で終わる完全な文を返す
+        # 文終端記号で終わる完全な文を返す。
+        # 最終成果物（elevated）はサイズ制約（ELEVATED_MIN_LENGTH=300〜MAX=1500）を持つため、
+        # モックの結論も下限以上で上限以下の文にする（素の生成・論理検査も同文）。
         else:
             text = (
                 "これは与えられたタスクに対するモックの完全な分析である。"
                 "具体的な洞察を含み、実行への手がかりを持つ。"
-                "以上が到達した結論である。"
+                "結論として、このタスクの本質は単一の観点では捉えきれず、"
+                "複数の視点を止揚する統合的枠組みが必須であることを示す。"
+                "第一に、価値の最大化と実現可能性の担保は両立しうる。"
+                "第二に、共感と独自性は対立ではなく、相互に補強する。"
+                "第三に、実装上のリスクは具体的な対策により管理可能である。"
+                "第四に、この統合的視座は元のどの草案にも存在しなかった超越的な解であり、"
+                "各観点の固有の真理を保存しながらその一面性だけを否定する。"
+                "第五に、この止揚は単なる折衷ではなく、各観点の極端さを起点に一段高い次元を開く。"
+                "以上を踏まえ、実行への手がかりを伴う結論を提示した。"
             )
             text += _mock_revision_marker(user)
         # ストリーム追記用: 全文が揃った時点で1回だけ流す（SDK クライアントと同じ動作）
@@ -323,6 +333,19 @@ def cmd_generate(args: argparse.Namespace) -> None:
     _print_artifact("素の生成（単発）", engine.generate(args.task))
 
 
+def _report_draft_error(agent: str, exc: Exception) -> None:
+    """単一エージェントの草案生成失敗を報告し、残りのエージェントで継続する。
+
+    engine.diverge が RuntimeError（上限回数連続の打ち切り/不完全）を catch したときに呼ばれる。
+    1エージェントの失敗で行列や improve ループ全体を落とさないための報告口。
+    """
+    print(
+        f"⚠ エージェント「{agent}」の草案生成を失敗としてスキップ（{exc}）。"
+        "残りのエージェントで継続します。",
+        file=sys.stderr,
+    )
+
+
 def _report_draft(args: argparse.Namespace, draft: Draft) -> None:
     """草案の完了通知（ファイル自体は engine の draft_dir が生成中に逐次追記している）。
 
@@ -346,6 +369,7 @@ def cmd_diverge(args: argparse.Namespace) -> None:
         args.task, agents=args.agents,
         draft_dir=args.out,
         on_draft=lambda d: _report_draft(args, d),
+        on_error=_report_draft_error,
     )
     for draft in drafts:
         _print_artifact(f"草案: {draft.agent}", draft.content)
@@ -373,6 +397,7 @@ def cmd_elevate(args: argparse.Namespace) -> None:
         args.task, agents=args.agents,
         draft_dir=args.out,
         on_draft=lambda d: _report_draft(args, d),
+        on_error=_report_draft_error,
     )
     reconciliation, elevated = engine.synthesize_with_reconciliation(
         drafts, method=args.method, task=args.task,
@@ -518,6 +543,12 @@ def cmd_compare(args: argparse.Namespace) -> None:
     preservation_rates: list[float] = []
     baseline_label = "素の生成（単発）" if args.baseline == "single" else "ベースライン（best-of-n）"
     show_artifacts = runs == 1 or args.verbose
+    # 累積モード（2026-08-09、ユーザー指示）: run_02 以降は前回の昇華版を「改修対象」として
+    # 埋め込んだ改訂草案（_revision_task）から発散し、それを昇華して次の昇華版にする。
+    # これにより測定対象は「改善連鎖 vs 単発生成」になる（独立run前提の統計とは別物——
+    # 事前登録の打ち切り規則は累積化に合わせて再考する必要がある）。
+    # ベースライン（素の生成 / best-of-n）は累積させず、毎回オリジナルタスクから単発で測る。
+    elevated_prev: str | None = None
 
     for run_idx in range(runs):
         run_num = run_idx + 1
@@ -532,10 +563,13 @@ def cmd_compare(args: argparse.Namespace) -> None:
         else:
             run_args = args
 
+        # run_02 以降は前回の昇華版を改修する草案（改訂草案）を書かせる（累積モード）
+        draft_task = _revision_task(task, elevated_prev) if elevated_prev is not None else task
         drafts = engine.diverge(
-            task, agents=run_args.agents,
+            draft_task, agents=run_args.agents,
             draft_dir=run_args.out,
             on_draft=lambda d: _report_draft(run_args, d),
+            on_error=_report_draft_error,
         )
         reconciliation, elevated = engine.synthesize_with_reconciliation(
             drafts, method=run_args.method, task=task,
@@ -560,6 +594,12 @@ def cmd_compare(args: argparse.Namespace) -> None:
 
         _save(run_args, "raw" if run_args.baseline == "single" else "best_single", baseline)
         _save(run_args, "elevated", elevated)
+        if elevated_prev is not None:
+            print(
+                f"[run {run_num}/{runs}] 累積モード: 前回の昇華版を改修した草案から昇華"
+                f"（elevated {len(elevated)} 字）"
+            )
+        elevated_prev = elevated
 
         # 具体性保存指数: 発散草案の具体トークンが昇華成果物に残存する割合（--evaluate 時のみ集計）
         if args.evaluate:
@@ -606,6 +646,8 @@ def cmd_compare(args: argparse.Namespace) -> None:
             f"ELEVATE:            {_stat_summary(elevated_scores)}",
             f"差（ELEVATE−ベースライン）: {_stat_summary(diffs)}",
             f"勝率（ELEVATE > ベースライン）: {wins}/{runs} = {wins / runs:.1%}",
+            "注: run_02+ は累積モード（前回の昇華版を改修した草案→昇華の改善連鎖）で測定。",
+            "    ベースラインは毎回オリジナルタスクからの単発生成。独立run前提の統計とは別物。",
         ]
         wlo, whi = _wilson_interval(wins, runs)
         summary_lines.append(f"  勝率 95%CI（Wilson）: {wlo:.1%}〜{whi:.1%}")
@@ -696,6 +738,7 @@ def cmd_improve(args: argparse.Namespace) -> None:
         drafts = engine.diverge(
             draft_task, agents=args.agents, draft_dir=round_args.out,
             on_draft=lambda d: _report_draft(round_args, d),
+            on_error=_report_draft_error,
         )
         reconciliation, elevated = engine.synthesize_with_reconciliation(
             drafts, method=args.method, task=task,
@@ -776,6 +819,10 @@ def _save_measurement(
     wlo, whi = _wilson_interval(wins, runs)
     dlo, dhi = _mean_confidence_interval(diffs)
     d = _cohens_d(baseline_scores, elevated_scores)
+    cumulative_note = (
+        "\n- 注: run_02+ は累積モード（前回の昇華版を改修した草案→昇華の改善連鎖）で測定。\n"
+        "  ベースラインは毎回オリジナルタスクからの単発生成。独立run前提の統計とは別物。\n"
+    ) if runs > 1 else ""
     text = (
         f"# 比較計測（--runs {runs}）\n\n"
         f"- {baseline_label}: {_stat_summary(baseline_scores)}\n"
@@ -785,6 +832,7 @@ def _save_measurement(
         f"  - 勝率 95%CI（Wilson）: {wlo:.1%}〜{whi:.1%}\n"
         f"  - 差の 95%CI（t, 両側）: {dlo:+.3f}〜{dhi:+.3f}\n"
         f"  - 効果量（Cohen's d）: {d:+.2f}\n"
+        f"{cumulative_note}"
     )
     if preservation_rates:
         pmean = sum(preservation_rates) / len(preservation_rates)
