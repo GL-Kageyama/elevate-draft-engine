@@ -25,6 +25,18 @@ def _read(path: Path) -> str:
     return path.read_text() if path.exists() else ""
 
 
+def _read_first(*paths: Path) -> str:
+    """最初に存在するファイルの内容を返す（無ければ空文字）。
+
+    2026-08-09 の出力カテゴリ分類（drafts/evaluations/artifacts）以前のフラットな
+    出力ディレクトリにも対応するため、新レイアウト → 旧レイアウトの順に探す。
+    """
+    for p in paths:
+        if p.exists():
+            return p.read_text()
+    return ""
+
+
 def _find_runs(out_dir: Path) -> list[Path]:
     """run_NN/ サブフォルダのリスト（昇順）。なければ [out_dir] を返す（--runs 1）。"""
     runs = sorted([p for p in out_dir.iterdir() if p.is_dir() and re.fullmatch(r"run_\d+", p.name)])
@@ -43,10 +55,14 @@ def _score_table(measurement: str) -> str:
 
 def _run_block(run_dir: Path, idx: int) -> list[str]:
     """1 run 分の比較ブロック（素AI生成と昇華版を並べて読める形）を組み立てる。"""
-    raw = _read(run_dir / "raw.md").strip()
-    elevated = _read(run_dir / "elevated.md").strip()
-    baseline_eval = _read(run_dir / "evaluation_baseline.md").strip()
-    elevated_eval = _read(run_dir / "evaluation_elevated.md").strip()
+    raw = _read_first(run_dir / "artifacts/raw.md", run_dir / "raw.md").strip()
+    elevated = _read_first(run_dir / "artifacts/elevated.md", run_dir / "elevated.md").strip()
+    baseline_eval = _read_first(
+        run_dir / "evaluations/evaluation_baseline.md", run_dir / "evaluation_baseline.md"
+    ).strip()
+    elevated_eval = _read_first(
+        run_dir / "evaluations/evaluation_elevated.md", run_dir / "evaluation_elevated.md"
+    ).strip()
 
     lines: list[str] = []
     if not raw and not elevated:

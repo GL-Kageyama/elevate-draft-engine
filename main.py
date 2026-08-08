@@ -309,11 +309,31 @@ def _resolve_out(args: argparse.Namespace, task: str) -> argparse.Namespace:
     return args
 
 
+def _category(name: str) -> str | None:
+    """run_NN/ round_NN/ 内のファイルを分類するサブフォルダ名。上位に置くものは None。
+
+    2026-08-09 ユーザー指示: 出力がフラットに並ぶため、種類ごとにフォルダを切って分類する。
+    - draft_*.md → drafts/
+    - evaluation_*.md → evaluations/
+    - reconciliation / elevated / raw / best_single → artifacts/
+    - input / comparison / measurement / progress / calibration → 従来どおり上位（--out 直下）
+    """
+    if name.startswith("draft"):
+        return "drafts"
+    if name.startswith("evaluation"):
+        return "evaluations"
+    if name in {"reconciliation", "elevated", "raw", "best_single"}:
+        return "artifacts"
+    return None
+
+
 def _save(args: argparse.Namespace, name: str, text: str) -> None:
     if args.out is None:
         return
     args.out.mkdir(parents=True, exist_ok=True)
-    path = args.out / f"{name}.md"
+    cat = _category(name)
+    path = (args.out / cat / f"{name}.md") if cat else (args.out / f"{name}.md")
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)
     print(f"→ 保存: {path}")
 
@@ -359,7 +379,7 @@ def _report_draft(args: argparse.Namespace, draft: Draft) -> None:
             file=sys.stderr,
         )
     if args.out is not None:
-        print(f"→ 保存: {args.out / f'draft_{draft.agent}.md'}")
+        print(f"→ 保存: {args.out / 'drafts' / f'draft_{draft.agent}.md'}")
 
 
 def cmd_diverge(args: argparse.Namespace) -> None:
@@ -367,7 +387,7 @@ def cmd_diverge(args: argparse.Namespace) -> None:
     engine = _make_engine(args)
     drafts = engine.diverge(
         args.task, agents=args.agents,
-        draft_dir=args.out,
+        draft_dir=args.out / "drafts" if args.out else None,
         on_draft=lambda d: _report_draft(args, d),
         on_error=_report_draft_error,
     )
@@ -380,8 +400,8 @@ def cmd_synthesize(args: argparse.Namespace) -> None:
     drafts = _load_draft_files(args.draft_files)
     reconciliation, elevated = engine.synthesize_with_reconciliation(
         drafts, method=args.method, task=args.task,
-        reconciliation_sink=args.out / "reconciliation.md" if args.out else None,
-        artifact_sink=args.out / "elevated.md" if args.out else None,
+        reconciliation_sink=args.out / "artifacts/reconciliation.md" if args.out else None,
+        artifact_sink=args.out / "artifacts/elevated.md" if args.out else None,
     )
     if reconciliation:
         _save(args, "reconciliation", reconciliation)
@@ -395,14 +415,14 @@ def cmd_elevate(args: argparse.Namespace) -> None:
     _save_input(args, args.task)
     drafts = engine.diverge(
         args.task, agents=args.agents,
-        draft_dir=args.out,
+        draft_dir=args.out / "drafts" if args.out else None,
         on_draft=lambda d: _report_draft(args, d),
         on_error=_report_draft_error,
     )
     reconciliation, elevated = engine.synthesize_with_reconciliation(
         drafts, method=args.method, task=args.task,
-        reconciliation_sink=args.out / "reconciliation.md" if args.out else None,
-        artifact_sink=args.out / "elevated.md" if args.out else None,
+        reconciliation_sink=args.out / "artifacts/reconciliation.md" if args.out else None,
+        artifact_sink=args.out / "artifacts/elevated.md" if args.out else None,
     )
     if reconciliation:
         _save(args, "reconciliation", reconciliation)
@@ -567,14 +587,14 @@ def cmd_compare(args: argparse.Namespace) -> None:
         draft_task = _revision_task(task, elevated_prev) if elevated_prev is not None else task
         drafts = engine.diverge(
             draft_task, agents=run_args.agents,
-            draft_dir=run_args.out,
+            draft_dir=run_args.out / "drafts" if run_args.out else None,
             on_draft=lambda d: _report_draft(run_args, d),
             on_error=_report_draft_error,
         )
         reconciliation, elevated = engine.synthesize_with_reconciliation(
             drafts, method=run_args.method, task=task,
-            reconciliation_sink=run_args.out / "reconciliation.md" if run_args.out else None,
-            artifact_sink=run_args.out / "elevated.md" if run_args.out else None,
+            reconciliation_sink=run_args.out / "artifacts/reconciliation.md" if run_args.out else None,
+            artifact_sink=run_args.out / "artifacts/elevated.md" if run_args.out else None,
         )
         if reconciliation:
             _save(run_args, "reconciliation", reconciliation)
@@ -588,7 +608,7 @@ def cmd_compare(args: argparse.Namespace) -> None:
         else:
             baseline = engine.generate(
                 task,
-                sink=run_args.out / "raw.md" if run_args.out else None,
+                sink=run_args.out / "artifacts/raw.md" if run_args.out else None,
             )
             baseline_score = None
 
@@ -618,7 +638,7 @@ def cmd_compare(args: argparse.Namespace) -> None:
             if baseline_score is None:  # single ベースラインはここで初めて評価
                 baseline_result = _evaluate_and_report(
                     baseline_label, baseline, task, evaluator,
-                    save_to=run_dir / "evaluation_baseline.md" if run_dir else None,
+                    save_to=run_dir / "evaluations/evaluation_baseline.md" if run_dir else None,
                 )
                 baseline_score = baseline_result.overall
             else:  # best-of-n は選択時のスコアを報告（再評価しない）
@@ -626,11 +646,11 @@ def cmd_compare(args: argparse.Namespace) -> None:
                 print()
                 if run_dir is not None:
                     _save_baseline_score_record(
-                        run_dir / "evaluation_baseline.md", baseline_label, baseline_score, evaluator
+                        run_dir / "evaluations/evaluation_baseline.md", baseline_label, baseline_score, evaluator
                     )
             elevated_result = _evaluate_and_report(
                 "ELEVATE", elevated, task, evaluator,
-                save_to=run_dir / "evaluation_elevated.md" if run_dir else None,
+                save_to=run_dir / "evaluations/evaluation_elevated.md" if run_dir else None,
             )
             elevated_score = elevated_result.overall
             baseline_scores.append(baseline_score)
@@ -736,14 +756,14 @@ def cmd_improve(args: argparse.Namespace) -> None:
             draft_task = _revision_task(task, elevated_prev)
 
         drafts = engine.diverge(
-            draft_task, agents=args.agents, draft_dir=round_args.out,
+            draft_task, agents=args.agents, draft_dir=round_args.out / "drafts" if round_args.out else None,
             on_draft=lambda d: _report_draft(round_args, d),
             on_error=_report_draft_error,
         )
         reconciliation, elevated = engine.synthesize_with_reconciliation(
             drafts, method=args.method, task=task,
-            reconciliation_sink=round_args.out / "reconciliation.md" if round_args.out else None,
-            artifact_sink=round_args.out / "elevated.md" if round_args.out else None,
+            reconciliation_sink=round_args.out / "artifacts/reconciliation.md" if round_args.out else None,
+            artifact_sink=round_args.out / "artifacts/elevated.md" if round_args.out else None,
         )
         if reconciliation:
             _save(round_args, "reconciliation", reconciliation)
@@ -756,7 +776,7 @@ def cmd_improve(args: argparse.Namespace) -> None:
             evaluator = _make_evaluator(args)
             result = _evaluate_and_report(
                 f"round {r} 昇華版", elevated, task, evaluator,
-                save_to=round_args.out / "evaluation.md" if round_args.out else None,
+                save_to=round_args.out / "evaluations/evaluation.md" if round_args.out else None,
             )
             entry["overall"] = result.overall
         progress.append(entry)

@@ -77,7 +77,7 @@ def test_improve_second_round_inherits_previous_elevated(tmp_path, monkeypatch) 
     )
     assert code == 0
 
-    elevated_1 = (tmp_path / "round_01" / "elevated.md").read_text()
+    elevated_1 = (tmp_path / "round_01" / "artifacts" / "elevated.md").read_text()
     assert elevated_1.strip()
     # round 2 の改修草案コールに「改修対象: 前回の昇華版」と round 1 の昇華版が入る
     draft_users = [user for (system, user, _) in gen.calls if "草案の作り方" in system]
@@ -112,9 +112,9 @@ def test_improve_rounds_save_each_round(tmp_path) -> None:
     for n in ("01", "02", "03"):
         rd = tmp_path / f"round_{n}"
         assert rd.is_dir(), f"{rd} が存在しない"
-        assert (rd / "elevated.md").exists()
-        assert (rd / "reconciliation.md").exists()
-        assert any(rd.glob("draft_*.md")), f"{rd} に草案がない"
+        assert (rd / "artifacts" / "elevated.md").exists()
+        assert (rd / "artifacts" / "reconciliation.md").exists()
+        assert any((rd / "drafts").glob("draft_*.md")), f"{rd} に草案がない"
     assert (tmp_path / "progress.md").exists()
 
 
@@ -124,7 +124,7 @@ def test_improve_single_round_flat(tmp_path) -> None:
         ["improve", "タスク", "--mock", "--rounds", "1", "--out", str(tmp_path)]
     )
     assert code == 0
-    assert (tmp_path / "elevated.md").exists()
+    assert (tmp_path / "artifacts" / "elevated.md").exists()
     assert not list(tmp_path.glob("round_*")), "rounds=1 で round_NN/ を作らない"
 
 

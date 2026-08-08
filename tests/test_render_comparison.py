@@ -70,6 +70,30 @@ def test_render_runs_includes_measurement_and_each_run(tmp_path) -> None:
     assert "評価" in md  # evaluation_*.md が読み込まれる
 
 
+def test_render_runs_new_category_layout(tmp_path) -> None:
+    """新レイアウト（artifacts/ evaluations/ drafts/）の出力も比較ドキュメントにできる。
+
+    2026-08-09 の出力分類変更後は run_NN/ 内がカテゴリ別フォルダになる。旧レイアウトの
+    フォールバックに加え、新レイアウトが正しく読めることを確認する。
+    """
+    out = tmp_path / "new"
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "input.md").write_text("# タスク\n\n分類レイアウト\n")
+    for n in ("01", "02"):
+        run = out / f"run_{n}"
+        (run / "artifacts").mkdir(parents=True)
+        (run / "evaluations").mkdir()
+        (run / "drafts").mkdir()
+        (run / "artifacts" / "raw.md").write_text(f"run{n} の素AI生成。")
+        (run / "artifacts" / "elevated.md").write_text(f"run{n} の昇華版。")
+        (run / "evaluations" / "evaluation_baseline.md").write_text(f"baseline overall=0.7{n}（Pass）")
+        (run / "evaluations" / "evaluation_elevated.md").write_text(f"elevated overall=0.8{n}（Pass）")
+        (run / "drafts" / "draft_strategist.md").write_text("草案。")
+    md = render_comparison.render(out)
+    assert "run01 の素AI生成。" in md and "run02 の素AI生成。" in md
+    assert "昇華版" in md and "評価" in md
+
+
 def test_render_missing_files_graceful(tmp_path) -> None:
     """raw/elevated が無い run ディレクトリでも落ちない。"""
     out = tmp_path / "empty"

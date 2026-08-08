@@ -206,10 +206,10 @@ def test_compare_without_out_saves_to_outputs_task_dir(tmp_path) -> None:
     assert code == 0
     out_dir = tmp_path / "outputs" / "タスク"
     assert (out_dir / "input.md").exists()
-    assert (out_dir / "elevated.md").exists()
-    assert (out_dir / "raw.md").exists()
-    assert (out_dir / "reconciliation.md").exists()
-    assert list(out_dir.glob("draft_*.md")), "デフォルトで草案が保存されていない"
+    assert (out_dir / "artifacts" / "elevated.md").exists()
+    assert (out_dir / "artifacts" / "raw.md").exists()
+    assert (out_dir / "artifacts" / "reconciliation.md").exists()
+    assert list((out_dir / "drafts").glob("draft_*.md")), "デフォルトで草案が保存されていない"
 
 
 # ---- per-run フォルダ分離（--runs > 1 の履歴保存） ----
@@ -226,21 +226,23 @@ def test_compare_runs_saves_each_run_in_own_folder(tmp_path) -> None:
     assert "勝率" in (tmp_path / "measurement.md").read_text()
     for n in ("01", "02"):
         run_dir = tmp_path / f"run_{n}"
-        assert (run_dir / "elevated.md").exists(), f"{run_dir}/elevated.md が無い"
-        assert (run_dir / "raw.md").exists(), f"{run_dir}/raw.md が無い"
-        assert (run_dir / "reconciliation.md").exists(), f"{run_dir}/reconciliation.md が無い"
-        assert (run_dir / "evaluation_baseline.md").exists(), f"{run_dir}/evaluation_baseline.md が無い"
-        assert (run_dir / "evaluation_elevated.md").exists(), f"{run_dir}/evaluation_elevated.md が無い"
-        assert list(run_dir.glob("draft_*.md")), f"{run_dir} に草案が保存されていない"
+        assert (run_dir / "artifacts" / "elevated.md").exists(), f"{run_dir}/elevated.md が無い"
+        assert (run_dir / "artifacts" / "raw.md").exists(), f"{run_dir}/raw.md が無い"
+        assert (run_dir / "artifacts" / "reconciliation.md").exists(), f"{run_dir}/reconciliation.md が無い"
+        assert (run_dir / "evaluations" / "evaluation_baseline.md").exists(), f"{run_dir}/evaluation_baseline.md が無い"
+        assert (run_dir / "evaluations" / "evaluation_elevated.md").exists(), f"{run_dir}/evaluation_elevated.md が無い"
+        assert list((run_dir / "drafts").glob("draft_*.md")), f"{run_dir} に草案が保存されていない"
 
 
 def test_compare_single_run_out_flat(tmp_path) -> None:
-    """--runs 1 は従来どおり --out 直下へ保存（run_NN/ を作らない）。"""
+    """--runs 1 は run_NN/ を作らず --out 直下にカテゴリ分類で保存する。"""
     code, _ = _run_compare(
         ["compare", "タスク", "--mock", "--evaluate", "--runs", "1", "--out", str(tmp_path)]
     )
     assert code == 0
-    assert (tmp_path / "elevated.md").exists()
+    assert (tmp_path / "artifacts" / "elevated.md").exists()
+    assert (tmp_path / "artifacts" / "raw.md").exists()
+    assert (tmp_path / "artifacts" / "reconciliation.md").exists()
     assert not list(tmp_path.glob("run_*")), "--runs 1 で run_* フォルダを作らない"
 
 
@@ -259,10 +261,10 @@ def test_compare_runs_cumulative_from_second_run(tmp_path) -> None:
     assert "累積モード" in (tmp_path / "measurement.md").read_text()
 
     run_01_drafts = "".join(
-        p.read_text() for p in (tmp_path / "run_01").glob("draft_*.md")
+        p.read_text() for p in (tmp_path / "run_01" / "drafts").glob("draft_*.md")
     )
     run_02_drafts = "".join(
-        p.read_text() for p in (tmp_path / "run_02").glob("draft_*.md")
+        p.read_text() for p in (tmp_path / "run_02" / "drafts").glob("draft_*.md")
     )
     # run_01 は改修なし（オリジナルタスクから発散）→ 改修マーカーが無い
     assert "改修草案" not in run_01_drafts

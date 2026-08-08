@@ -81,7 +81,11 @@ cd "$ENGINE_REPO"
   --out "$SAVE_DIR"
 ```
 
-- `main.py` が保存する一式: `input.md` / `draft_{agent}.md` / `reconciliation.md`（昇華の下地）/ `elevated.md`（最終成果物）
+- `main.py` が保存する一式は**種類ごとのフォルダに分類**される（2026-08-09 ユーザー指示）:
+  `input.md`（タスク）は `--out` 直下、`draft_{agent}.md` は `drafts/`、
+  `reconciliation.md`（昇華の下地）/ `elevated.md` / `raw.md` は `artifacts/`、
+  `evaluation_*.md` は `evaluations/`。compare は `run_NN/`、improve は `round_NN/` でさらに分離。
+  旧レイアウト（フラット）は `python examples/reclassify_output.py <dir>` で新レイアウトに揃えられる。
 - 各草案は**テーゼ集中形式**（核心的主張/根拠/前提、500〜800字。`DRAFT_MAX_LENGTH`=1000字超過は再生成）——
   完全な分析レポートではなく、後の昇華に渡す先鋭化した1つのテーゼ。
   ただし**創作系タスク**（歌詞/小説/物語/詩/キャッチコピー等、`_is_creative_task` のキーワード判定）
