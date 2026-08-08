@@ -62,7 +62,7 @@ def test_wilson_interval_wins_all_brackets_high() -> None:
 
 
 def test_cohens_d_computes_effect_size() -> None:
-    """統合がベースラインを上回るとき正の効果量になる。"""
+    """昇華がベースラインを上回るとき正の効果量になる。"""
     d = main._cohens_d([0.7, 0.72, 0.71], [0.85, 0.87, 0.86])
     assert d > 0
     assert d > 1.0  # 明確に分離している場合は大きな効果量
@@ -97,7 +97,7 @@ def test_mock_evaluator_scores_drafts_by_name() -> None:
 
 
 def test_mock_evaluator_constant_for_non_draft() -> None:
-    """草案以外（素の生成・統合成果物）は一定のスコア（0.6）になる。
+    """草案以外（素の生成・昇華成果物）は一定のスコア（0.6）になる。
 
     ルーブリック再調整（2026-08-08）で「普通」は 0.6（旧 0.8 は天井で向上が可視化できない）。
     ポリシー密着5軸（2026-08-08 再調整(3)）の下では全軸が base のため overall = base。
@@ -122,7 +122,7 @@ def test_mock_generator_identifies_agents_after_strip() -> None:
     assert "エージェント「humanist」" in out
 
 
-# ---- cmd_compare（統合動作: --runs と --baseline） ----
+# ---- cmd_compare（昇華動作: --runs と --baseline） ----
 
 def _run_compare(argv: list[str], *, cwd: Path | None = None) -> tuple[int, str]:
     """main.main() を実行し、(exit_code, stdout+stderr の結合) を返す。

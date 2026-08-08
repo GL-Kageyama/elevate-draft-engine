@@ -1,30 +1,32 @@
-"""elevate-draft-engine — 複数の独立した草案を統合して一段高い成果物を生むエンジン。
+"""elevate-draft-engine — 複数の独立した草案を昇華（アウフヘーベン）して一段高い成果物を生むエンジン。
 
-## 構造（DIVERGE → SYNTHESIZE）
+## 構造（DIVERGE → AUFHEBEN → FINALIZE）
 
     タスク
       │
-      ├─→ [Draft: strategist]     価値
-      ├─→ [Draft: differentiator] 独自性
-      ├─→ [Draft: humanist]       共感
-      ├─→ [Draft: futurist]       将来性
-      ├─→ [Draft: designer]       体験設計
-      ├─→ [Draft: visionary]      世界観
-      ├─→ [Draft: implementer]    実現性
-      └─→ [Draft: storyteller]    物語
+      ├─→ [Draft: strategist]     価値（可能な限り逸脱）
+      ├─→ [Draft: differentiator] 独自性（可能な限り逸脱）
+      ├─→ [Draft: humanist]       共感（可能な限り逸脱）
+      ├─→ [Draft: futurist]       将来性（可能な限り逸脱）
+      ├─→ [Draft: designer]       体験設計（可能な限り逸脱）
+      ├─→ [Draft: visionary]      世界観（可能な限り逸脱）
+      ├─→ [Draft: implementer]    実現性（可能な限り逸脱）
+      └─→ [Draft: storyteller]    物語（可能な限り逸脱）
               │
               ↓
-       [Reconcile: 矛盾解決推理]   ← エージェント間の衝突を検出し、一段高い位置から解決する
+       [Aufheben: 弁証法的止揚]    ← 論理を超えた次元で各立場を否定しつつ保存し、昇華する
               │                     （思考の土台。読者向けではない）
               ↓
-       [Finalize: 最終化]          ← 解決済み推理だけを読み、明瞭な最終分析に仕上げる
+       [Finalize: 最終化]          ← 止揚の基盤だけを読み、超越的統合として仕上げる
               │
               ↓
          最終成果物
 
-肝は「複数の全く異なった draft を統合する」こと。草案生成（diverge）は前段に過ぎず、
-核心価値は synthesize（矛盾解決推理 → 最終化）にある。各エージェントは「より良いものを
-作る」クリエイター目線で統一され、エージェント同士の生産的衝突が統合解の源泉になる。
+肝は「可能な限り逸脱・発散した個別解を、論理を超えた世界で昇華（アウフヘーベン）し、
+超越的な統合解に到達する」こと。統合でなく、アウフヘーベン。
+草案生成（diverge）は前段に過ぎず、核心価値は synthesize（弁証法的止揚 → 最終化）にある。
+各エージェントは「極限まで逸脱する」クリエイターであり、その意図的不整合が昇華の源泉になる。
+止揚は論理的な矛盾解消ではない——対立を包含しつつ一段高い次元へ引き上げる弁証法的跳躍である。
 
 エージェントは**1エージェント=1ファイル**方式（frontmatter + ペルソナ本文）で
 agents/{name}.md に配置する。正本はファイル。
@@ -41,15 +43,15 @@ from typing import Callable, Protocol
 
 # ---- 素の生成（単発） ----
 ANALYSIS_SYSTEM = (
-    "あなたはAIサービス企画の専門家です。与えられたテーマを"
-    "Target（対象顧客）・Value（提供価値）・Risk（リスク）・Opportunity（機会）の"
-    "4観点で分析してください。分析は具体的・整合的・実行可能であること。"
+    "あなたは独立した分析者です。与えられたテーマを深く分析し、"
+    "複数の独立した視点が交差する地点から新たな洞察を引き出してください。"
+    "分析は具体的・深い洞察を伴い・実行への手がかりを持つこと。"
 )
 
 # ---- デフォルトエージェント（全クリエイター目線） ----
 # 各エージェントは agents/{name}.md に frontmatter（name, description）+ ペルソナ本文として
 # 配置する。正本はファイル。
-# 温度は draft_temperature（既定 0.7）で多様性を確保。
+# 温度は draft_temperature（既定 0.9）で可能な限りの逸脱・発散を確保。
 DEFAULT_AGENTS_DIR = Path(__file__).resolve().parent.parent / "agents"
 
 
@@ -88,8 +90,8 @@ def _strip_strong_claim(prompt: str) -> str:
     """エージェントプロンプトから「最強の主張」断言枠を除去する（アブレーション用）。
 
     「草案の作り方」の「枠を埋める」ステップと、末尾の「## 最強の主張」セクションを除去する。
-    reconcile は草案本文全体からも最強の主張を拾えるため、枠が無くても統合は機能する
-    （枠は「確実に拾うための定型」であり、必須ではない）。枠あり/なしの統合品質差を
+    Aufheben は草案本文全体からも最強の主張を拾えるため、枠が無くても昇華は機能する
+    （枠は「確実に拾うための定型」であり、必須ではない）。枠あり/なしの昇華品質差を
     測定したい場合（--no-strong-claim など）に使う。
     """
     # 1) 「草案の作り方」内の「枠を埋める」ステップ（数字付き箇条 + 1行の説明）を除去
@@ -99,77 +101,98 @@ def _strip_strong_claim(prompt: str) -> str:
     return text.rstrip()
 
 
-# ---- 単発統合（method="single-pass"） ----
+# ---- 単発昇華（method="single-pass"） ----
 SYNTHESIS_SYSTEM = (
-    "あなたは統合分析者です。同じテーマに対する複数の独立した草案を統合し、観点間の矛盾を"
-    "解消した一段高い分析を提示してください。"
+    "あなたは昇華者（Aufheber）です。同じテーマに対する複数の極端に逸脱した草案を読み、"
+    "それらを論理的な妥協や平均化ではなく、より高次元へ止揚（アウフヘーベン）してください。"
+    "各草案の一面的な正しさを否定しつつ、その真理の契機を保存し、矛盾を包括する"
+    "新たな枠組みそのものを創出してください。"
 )
 
 SYNTHESIS_INSTRUCTION = (
-    "以下は、同じテーマを異なる観点から分析した複数の独立した草案である。これらを読み、"
-    "以下を満たす統合分析を作成せよ:\n"
-    "1. 各草案の最強の主張と、それに対する最強の反論をそれぞれ特定せよ\n"
-    "2. 観点間の矛盾を無視せず、解消する論理を示せ（なぜ一方の懸念は致命傷ではないのか、"
-    "あるいはある観点の楽観はどの条件で正当化されるのか）\n"
-    "3. 最も強い反論に直接答えよ（回避せず、正面から論破または条件付き受容せよ）\n"
-    "4. 確信できる点は断定的に、不確実な点は前提として明示せよ\n"
-    "5. 統合を経て初めて得られた新たな視点があれば、それを明示せよ\n\n"
-    "単なる「全観点の併記」や「平均化」は不合格。矛盾を解決する一段高い推論を要求する。"
+    "以下は、同じテーマを異なる観点から極端に逸脱して書かれた複数の独立した草案である。"
+    "これらを読み、以下を満たす止揚分析を作成せよ:\n"
+    "1. 各草案の核心的主張を特定し、それがなぜ一面的か（何を見落としているか）を指摘せよ\n"
+    "2. 各草案の真理の契機——一面性の奥にある本物の洞察——を抽出せよ\n"
+    "3. 草案間の最も深い対立を特定せよ。論理的な解決（条件付き受容・妥協）ではなく、"
+    "対立する真理を同時に成立させる新たな枠組みを創出せよ\n"
+    "4. その枠組みは、どの単一草案にもなかったものでなければならない\n"
+    "5. 創出した枠組みから各草案を再解釈したとき、それらはどう位置づけられるかを示せ\n"
+    "6. 確信できる点は断定的に、不確実な点は前提として明示せよ\n\n"
+    "単なる「全観点の併記」や「平均化」「論理的妥協」は不合格。"
+    "矛盾を解消するのではなく、矛盾を包括する一段高い枠組みを創出することを要求する。"
 )
 
-# ---- 2段階統合（method="two-stage"） ----
-# 単発統合は推理と表現を同時に要求し、推理の冗長さが明瞭さを損なう。推理（Reconcile）と
-# 表現（Finalize）を分離し、深度と明瞭さを同時に確保する。
+# ---- 2段階止揚（method="two-stage"） ----
+# 単発止揚は昇華と表現を同時に要求し、昇華推理の冗長さが明瞭さを損なう。
+# 昇華（Aufheben）と表現（Finalize）を分離し、深度と明瞭さを同時に確保する。
 
-# 推理（Reconcile）: 観点間の矛盾の解決論理を深く言語化する。読者向けの成果物ではなく
-# 「思考の土台」。中間思考を含んでよいため、最終成果物の明瞭さに縛られず深く論証できる。
-RECONCILIATION_SYSTEM = (
-    "あなたは統合推理家です。同じテーマに対する複数の独立した草案を読み、観点間の矛盾を"
-    "解消する推理を記述してください。この推理は後続の工程が最終分析に仕上げるための"
-    "思考の土台であり、読者が直接見る成果物ではありません。論証の丁寧さと深さを最優先し、"
+# 昇華（Aufheben）: 各草案を否定しつつ保存し、矛盾を包括する新たな枠組みを創出する。
+# 読者向けの成果物ではなく「思考の土台」。中間思考を含んでよいため、
+# 最終成果物の明瞭さに縛られず深く飛躍できる。
+AUFHEBEN_SYSTEM = (
+    "あなたは弁証法的な昇華者（Aufheben practitioner）です。同じテーマに対する"
+    "複数の独立した草案を読み、論理的「解決」ではなく弁証法的止揚（アウフヘーベン）"
+    "によって一段高い次元へ引き上げてください。\n\n"
+    "それぞれの草案は意図的に極限まで逸脱しています——論理での「矛盾解消」は"
+    "できません。各立場の「一面的真理」を否定しつつ保存し、それらを包含する"
+    "超越的な統合へと高めてください。\n\n"
+    "この昇華は後続の工程が最終分析に仕上げるための思考の土台であり、"
+    "読者が直接見る成果物ではありません。深度と大胆さを最優先し、"
     "結論の一部が未確定でも構いません。"
 )
 
-RECONCILIATION_INSTRUCTION = (
-    "以下は、同じテーマを異なる観点から分析した複数の独立した草案である。これらを読み、"
-    "以下を明らかにする推理を記述せよ:\n"
-    "1. 各草案の最強の主張（他の観点がこれに反論しそうなもの）\n"
-    "2. 観点同士の最強の対立（どの観点がどこで衝突しているか）\n"
-    "3. 対立の本質がどこにあるか\n"
-    "4. その対立を解消する解決仮説（なぜ一方の懸念は致命傷ではないのか、"
-    "あるいはある観点の楽観はどの条件で正当化されるのか）\n"
-    "5. 統合を経て初めて得られる新たな視点\n\n"
-    "単なる「全観点の併記」や「平均化」は不合格。観点間の矛盾を解決する一段高い推論を要求する。\n"
-    "この推理は後続工程の最終分析の材料であり、読者に直接提示する成果物ではない。論証を尽くしてよい。"
+AUFHEBEN_INSTRUCTION = (
+    "以下は、同じテーマを異なる観点から分析した、意図的に極限まで逸脱させた複数の独立草案である。"
+    "これらを読み、弁証法的止揚（アウフヘーベン）を記述せよ:\n\n"
+    "1. **否定（Negation）**: 各草案の「一面的真理」を特定し、その真理が「全体の真理」を"
+    "僭称する限りにおいて否定せよ。各立場は正しい——しかしそれだけでは不十分である。"
+    "否定は破壊ではなく限定である。\n\n"
+    "2. **保存（Preservation）**: 否定した各立場の中に残る本物の洞察（truth-moment）を特定し、"
+    "それがなぜ保存されるべきか——なぜ捨ててはならないのか——を記述せよ。\n\n"
+    "3. **高次化（Elevation）**: 保存された洞察を、元の対立を包含する一段高い次元へと"
+    "引き上げよ。ここでの「解決」は論理的妥協（「条件付きで正しい」「致命的ではない」）"
+    "ではなく、対立の両項をそのまま含みながら、それらを超える新しい枠組みの創出である。\n\n"
+    "4. **超越的視点**: この止揚を経て初めて見える、元のどの草案にもなかった視点——"
+    "元の対立が「対立ですらなかった」と見える次元——を言語化せよ。\n\n"
+    "単なる「全観点の併記」や「平均化」や「条件付き論理解決」は不合格。"
+    "対立を「解消」するのではなく、対立そのものを素材として一段高い位置へと"
+    "昇華することを要求する。\n"
+    "この昇華は後続工程の最終分析の材料であり、読者に直接提示する成果物ではない。論証を尽くしてよい。"
 )
 
-# 表現（Finalize）: 解決済みの推理だけを読み、単発生成と同水準の明瞭な最終分析に仕上げる。
-# 推理の中間思考（草案同士の比較・経緯説明）を最終成果物に残さない。
+# 表現（Finalize）: 止揚推理だけを読み、超越的統合解を明瞭な最終成果物に仕上げる。
+# 昇華の中間思考（草案同士の比較・弁証法の手続き説明）を最終成果物に残さない。
 FINALIZE_SYSTEM = (
-    "あなたはAIサービス企画の専門家です。与えられた「矛盾解決推理」を、読み手に直接届く最終分析として"
-    "仕上げてください。推理の過程（草案同士の比較・経緯説明）は含めず、確定した結論だけを整理して"
-    "記述してください。分析は具体的・整合的・実行可能であること。"
+    "あなたは超越的統合の表現者です。与えられた「止揚（アウフヘーベン）の基盤」を、"
+    "読み手に直接届く最終分析として仕上げてください。止揚の過程（草案同士の比較・"
+    "経緯説明）は含めず、高められた結論だけを整理して記述してください。"
+    "分析は具体的・整合的・実行可能でありながら、元のどの草案にもなかった"
+    "超越的な統合として提示すること。"
 )
 
 FINALIZE_INSTRUCTION = (
-    "上記の推理に基づき、このテーマの最終分析を記述せよ:\n"
-    "1. 推理の中間思考（草案同士の比較・経緯説明）は含めず、確定した結論だけを書く\n"
+    "上記の止揚に基づき、このテーマの最終分析を記述せよ:\n"
+    "1. 止揚の中間過程（草案同士の比較・経緯説明）は含めず、高められた結論だけを書く\n"
     "2. Target（対象顧客）・Value（提供価値）・Risk（リスクとその対策）・Opportunity（機会）の"
-    "4観点で整理する\n"
-    "3. 具体的・整合的・実行可能であること\n"
-    "4. 確信できる点は断定的に、不確実な点は前提として明示する"
+    "4観点で整理しつつ、これらを超越する統一的視座を示す\n"
+    "3. 具体的・整合的・実行可能でありながら、元のどの草案にもなかった超越的統合であること\n"
+    "4. 確信できる点は断定的に、不確実な点は前提として明示する\n"
+    "5. 単なる「バランスの取れた報告書」ではなく、一段高い次元の理解を読者に与えること"
 )
 
 # ---- 論理一貫性の復元工程（--logic-check） ----
 # 実測（n=1、旧5軸: creativity/logic）で ELEVATE は creativity +0.10 に対して logic -0.05。
-# 統合が「完成させる」より「多様化する」方向へ偏る可能性を示唆する（旧軸の観察。
+# 昇華が「完成させる」より「多様化する」方向へ偏る可能性を示唆する（旧軸の観察。
 # 2026-08-08 再調整(3)で5軸が多様性/統合性/超越性/誠実性/実用性に変わったため、
 # この数値は旧軸のままの記録である）。最終化の後に論理的一貫性を検証・
 # 復元する収束工程を構造として追加する（既定は無効。仮説の検証手段として使う）。
 LOGIC_CHECK_SYSTEM = (
-    "あなたは論理検証者です。与えられた成果物を読み、論理的矛盾・根拠の飛躍・"
-    "整合性の欠如を検査してください。矛盾を検出した場合は修正した最終版だけを出力し、"
-    "矛盾が無ければ元の成果物をそのまま出力してください。"
+    "あなたは検証者です。与えられた成果物を読み、論理的矛盾・根拠の飛躍・"
+    "整合性の欠如を検査してください。ただし、論理を超えた飛躍（アウフヘーベンによる"
+    "枠組みの創出）は矛盾とは見なさず、その飛躍に内在的な破綻がある場合のみ指摘せよ。"
+    "矛盾を検出した場合は修正した最終版だけを出力し、矛盾が無ければ元の成果物を"
+    "そのまま出力してください。"
 )
 
 LOGIC_CHECK_INSTRUCTION = (
@@ -215,20 +238,20 @@ def _detect_sentimentality(text: str) -> bool:
     return d["trope"] or d["cliche_emotion"]
 
 
-# ---- 草案生成の温度（多様性の確保）。統合・最終化・評価は 0.0（一貫性のため） ----
-DRAFT_TEMPERATURE = 0.7
+# ---- 草案生成の温度（可能な限りの逸脱・発散の確保）。最終化・評価は 0.0（一貫性のため） ----
+DRAFT_TEMPERATURE = 0.9
 
 # ---- 打ち切りガード（崩れたら再生成） ----
 _SYNTHESIS_TERMINAL_MARKERS = ("。", "！", "？", "…", "」", "）", "}", ")", '"', ".", "!", "?")
 
-# 統合生成の再生成上限（打ち切りが直らない場合の明示的失敗の境界）
-SYNTHESIS_MAX_ATTEMPTS = 3
+# 昇華生成の再生成上限（打ち切りが直らない場合の明示的失敗の境界）
+AUFHEBEN_MAX_ATTEMPTS = 3
 
-# 矛盾解決推理の完全性下限。
-# 推理は読者向けの散文ではなく「思考の土台」で、終端記号（。！」）等）で終わるとは限らない
+# 止揚（アウフヘーベン）の完全性下限。
+# 止揚は読者向けの散文ではなく「思考の土台」で、終端記号（。！」）等）で終わるとは限らない
 # （矢印「→」・箇条書き・前置きで終わりうる）。文途中の打ち切りは最終化が部分吸収できるため、
-# ここでは「推理が実質的に存在するか（極端に短い=推理を放棄した出力の防止）」だけを判定する。
-RECONCILIATION_MIN_LENGTH = 30
+# ここでは「止揚が実質的に存在するか（極端に短い=止揚を放棄した出力の防止）」だけを判定する。
+AUFHEBEN_MIN_LENGTH = 30
 
 
 class Generator(Protocol):
@@ -259,23 +282,23 @@ class Draft:
 # ---- 完全性ガード ----
 
 def _synthesis_is_complete(text: str) -> bool:
-    """最終分析・単発統合が文として終端しているか。空応答と打ち切り（終端記号なし）を区別する。"""
+    """最終分析・単発昇華が文として終端しているか。空応答と打ち切り（終端記号なし）を区別する。"""
     return bool(text) and text.rstrip().endswith(_SYNTHESIS_TERMINAL_MARKERS)
 
 
-def _reconciliation_is_complete(text: str) -> bool:
-    """矛盾解決推理の完全性判定。空・推理放棄（極端に短い）を再生成対象にする。"""
-    return bool(text) and len(text.strip()) >= RECONCILIATION_MIN_LENGTH
+def _aufheben_is_complete(text: str) -> bool:
+    """止揚（アウフヘーベン）の完全性判定。空・放棄（極端に短い）を再生成対象にする。"""
+    return bool(text) and len(text.strip()) >= AUFHEBEN_MIN_LENGTH
 
 
 def _draft_is_complete(text: str) -> bool:
     """草案の完全性判定。文途中で切れた打ち切りを再生成対象にする。
 
-    草案は統合段階（reconcile）の読み物で、途中で切れると内容が欠落するため終端記号で
+    草案は昇華段階（Aufheben）の読み物で、途中で切れると内容が欠落するため終端記号で
     判定する（2026-08-08 実測: ゲートウェイが "…横のつながりが強い。「この健保" で
     打ち切った草案を素通ししていた）。末尾のマークダウン装飾（** の閉じ等）は除いて
     判定する（claude -p 経由の草案が "…。**" で終わることがある）。「最強の主張」枠の
-    有無は必須にしない——枠が無くても reconcile は本文全体から最強の主張を拾える。
+    有無は必須にしない——枠が無くても Aufheben は本文全体から最強の主張を拾える。
     """
     if not text:
         return False
@@ -289,7 +312,7 @@ def _generate_with_completeness_guard(
     user: str,
     *,
     temperature: float | None = None,
-    label: str = "統合生成",
+    label: str = "昇華生成",
     is_complete=None,
     sink: Path | None = None,
 ) -> str:
@@ -297,8 +320,8 @@ def _generate_with_completeness_guard(
 
     構造が既知の呼び出し側で決定的に検証し、崩れた出力は再生成する。
     上限回数で直らない場合は明示的失敗（不完全出力を評価に渡さない）。
-    temperature を渡すことで、推理は温度0.7、最終化は0.0を実現する。
-    is_complete を渡すと判定を差し替えられる（最終化=文終端 / 推理=長さ下限）。
+    temperature を渡すことで、昇華は温度0.9、最終化は0.0を実現する。
+    is_complete を渡すと判定を差し替えられる（最終化=文終端 / 止揚=長さ下限）。
 
     sink が与えられたら、生成前に空ファイルを作り、on_chunk 経由で届く文字列を
     逐次追記する（草案のストリーム保存）。打ち切りで再生成するときはファイルを
@@ -307,7 +330,7 @@ def _generate_with_completeness_guard(
     if is_complete is None:
         is_complete = _synthesis_is_complete
     last_err = ""
-    for _ in range(SYNTHESIS_MAX_ATTEMPTS):
+    for _ in range(AUFHEBEN_MAX_ATTEMPTS):
         kwargs = {"system": system, "user": user, "temperature": temperature}
         handle = None
         if sink is not None:
@@ -327,32 +350,33 @@ def _generate_with_completeness_guard(
         if is_complete(artifact):
             return artifact
         last_err = f"{label}が打ち切られた/不完全（…{artifact[-20:]!r}）"
-    raise RuntimeError(f"{label}が{SYNTHESIS_MAX_ATTEMPTS}回連続で打ち切り/不完全: {last_err}")
+    raise RuntimeError(f"{label}が{AUFHEBEN_MAX_ATTEMPTS}回連続で打ち切り/不完全: {last_err}")
 
 
 def _generate_synthesis(generator: Generator, synthesis_user: str) -> str:
-    """単発統合（method="single-pass"）を生成する。打ち切りは再生成し、直らない場合は明示的に失敗させる。"""
+    """単発昇華（method="single-pass"）を生成する。打ち切りは再生成し、直らない場合は明示的に失敗させる。"""
     return _generate_with_completeness_guard(
-        generator, ANALYSIS_SYSTEM + SYNTHESIS_SYSTEM, synthesis_user, label="統合生成"
+        generator, ANALYSIS_SYSTEM + SYNTHESIS_SYSTEM, synthesis_user, label="昇華生成"
     )
 
 
-def _generate_reconciliation(generator: Generator, reconcile_user: str, *, temperature: float) -> str:
-    """矛盾解決推理を生成する。極端に短い（推理を放棄した）出力は再生成。
+def _generate_aufheben(generator: Generator, aufheben_user: str, *, temperature: float) -> str:
+    """止揚（アウフヘーベン）を生成する。極端に短い（放棄した）出力は再生成。
 
-    推理は「思考の土台」で文終端記号で終わるとは限らないため、終端記号チェックは誤判定を
-    招く（実測: 6104字の完全な推理が再生成ループに落ちた）。長さ下限で「推理が実質的に
-    存在するか」だけを判定する。空応答はクライアントが再試行済み。温度は 0.7（多様性・深度）。
+    止揚は「思考の土台」で文終端記号で終わるとは限らないため、終端記号チェックは誤判定を
+    招く（実測: 6104字の完全な推理が再生成ループに落ちた）。長さ下限で「止揚が実質的に
+    存在するか」だけを判定する。空応答はクライアントが再試行済み。温度は 0.9
+    （発散と同率。弁証法的跳躍に創造性を要するため）。
     """
     return _generate_with_completeness_guard(
-        generator, RECONCILIATION_SYSTEM, reconcile_user,
-        temperature=temperature, label="矛盾解決推理",
-        is_complete=_reconciliation_is_complete,
+        generator, AUFHEBEN_SYSTEM, aufheben_user,
+        temperature=temperature, label="昇華",
+        is_complete=_aufheben_is_complete,
     )
 
 
 def _generate_finalize(generator: Generator, finalize_user: str) -> str:
-    """最終分析を生成する。打ち切りは再生成。温度は 0.0（一貫性。素の生成と同じ明瞭な表形式）。"""
+    """最終分析を生成する。打ち切りは再生成。温度は 0.0（一貫性。止揚の基盤から超越的統合を明瞭に仕上げる）。"""
     return _generate_with_completeness_guard(
         generator, ANALYSIS_SYSTEM + FINALIZE_SYSTEM, finalize_user, label="最終分析"
     )
@@ -361,8 +385,9 @@ def _generate_finalize(generator: Generator, finalize_user: str) -> str:
 def _generate_logic_check(generator: Generator, artifact: str, task: str) -> str:
     """論理一貫性の復元工程。最終成果物を検査し、矛盾があれば修正版を返す。
 
-    観察された creativity +0.10 / logic -0.05 の非対称（統合が「多様化」に偏る）への
+    観察された creativity +0.10 / logic -0.05 の非対称（昇華が「多様化」に偏る）への
     対応として、最終化の後に論理的一貫性を復元する収束工程を構造として追加する。
+    論理を超えた飛躍（アウフヘーベンによる枠組みの創出）自体は矛盾と見なさない。
     温度は 0.0（一貫性）。完全性ガード（文終端）を適用。矛盾が無ければ元の成果物を
     そのまま返すため、品質を下げない。
     """
@@ -382,7 +407,7 @@ def _generate_draft(
 ) -> str:
     """エージェント草案を生成する。文途中の打ち切りは再生成。温度は draft_temperature。
 
-    推理・最終化と同じ完全性ガード（broken output → regenerate）を草案にも適用する。
+    昇華・最終化と同じ完全性ガード（broken output → regenerate）を草案にも適用する。
     sink が与えられたら、生成前に空ファイルを作り、生成中に逐次追記する。
     """
     return _generate_with_completeness_guard(
@@ -398,31 +423,31 @@ def _drafts_block(drafts: list[Draft]) -> list[str]:
     return [f"【草案（観点: {d.agent}）】\n{d.content}" for d in drafts]
 
 
-def _build_reconciliation_prompt(task: str, drafts: list[Draft]) -> str:
-    """矛盾解決推理の user プロンプトを組み立てる。"""
+def _build_aufheben_prompt(task: str, drafts: list[Draft]) -> str:
+    """止揚（アウフヘーベン）の user プロンプトを組み立てる。"""
     parts = [f"【タスク】\n{task}"] if task else []
     parts += _drafts_block(drafts)
-    parts.append(f"【推理指示】\n{RECONCILIATION_INSTRUCTION}")
+    parts.append(f"【昇華指示】\n{AUFHEBEN_INSTRUCTION}")
     return "\n\n".join(parts)
 
 
 def _build_synthesis_prompt(task: str, drafts: list[Draft]) -> str:
-    """単発統合（method="single-pass"）の user プロンプトを組み立てる。"""
+    """単発昇華（method="single-pass"）の user プロンプトを組み立てる。"""
     parts = [f"【タスク】\n{task}"] if task else []
     parts += _drafts_block(drafts)
-    parts.append(f"【統合指示】\n{SYNTHESIS_INSTRUCTION}")
+    parts.append(f"【昇華指示】\n{SYNTHESIS_INSTRUCTION}")
     return "\n\n".join(parts)
 
 
 def _build_finalize_prompt(task: str, reconciliation: str) -> str:
     """最終分析の user プロンプトを組み立てる。
 
-    最終化は草案ではなく「解決済みの推理」だけを読む。推理の中間思考が最終成果物に
-    漏れないよう、確定した結論だけを書かせる。
+    最終化は草案ではなく「止揚（アウフヘーベン）の基盤」だけを読む。止揚の中間過程が
+    最終成果物に漏れないよう、高められた結論だけを書かせる。
     """
     parts = [f"【タスク】\n{task}"] if task else []
     parts += [
-        f"【矛盾解決推理】\n{reconciliation}",
+        f"【止揚の基盤】\n{reconciliation}",
         f"【最終化指示】\n{FINALIZE_INSTRUCTION}",
     ]
     return "\n\n".join(parts)
@@ -431,11 +456,11 @@ def _build_finalize_prompt(task: str, reconciliation: str) -> str:
 # ---- エンジン本体 ----
 
 class DraftEngine:
-    """複数のエージェント（観点）から草案を生成し、統合して一段高い成果物を生むエンジン。
+    """複数のエージェント（観点）から草案を生成し、昇華（アウフヘーベン）して一段高い成果物を生むエンジン。
 
     - `generate(task)`  … 素のAI（単発生成）。1 call
     - `diverge(task)`   … 登録エージェントで独立草案を生成。8 calls（既定）
-    - `synthesize(drafts)` … 外部草案も含む複数草案を統合（核心）
+    - `synthesize(drafts)` … 外部草案も含む複数草案を昇華（核心）
     - `elevate(task)`   … diverge → synthesize の一気ラッパー
 
     スロットル（空応答対策）は client（ClaudeClient）側で効いている。
@@ -459,7 +484,7 @@ class DraftEngine:
         else:
             self._agents = load_agents(agents_dir)
         # 断言枠アブレーション: strong_claim_frame=False のとき「最強の主張」枠を除去する
-        # （枠あり/なしの統合品質差を測定したいとき用。既定は枠あり = 従来動作）。
+        # （枠あり/なしの昇華品質差を測定したいとき用。既定は枠あり = 従来動作）。
         if not strong_claim_frame:
             self._agents = {name: _strip_strong_claim(p) for name, p in self._agents.items()}
 
@@ -529,22 +554,22 @@ class DraftEngine:
         self, drafts: list[Draft], method: str = "two-stage", task: str = "",
         *, enable_logic_check: bool | None = None,
     ) -> tuple[str, str]:
-        """統合し、推理（統合の下地）と成果物を返す。
+        """昇華し、止揚（昇華の下地）と成果物を返す。
 
-        戻り値: (reconciliation, artifact)。method="single-pass" は推理が無いため ("", artifact)。
-        推理を保存したい呼び出し側（CLI の --out 等）はこちらを使う。
+        戻り値: (reconciliation, artifact)。method="single-pass" は止揚が無いため ("", artifact)。
+        止揚を保存したい呼び出し側（CLI の --out 等）はこちらを使う。
 
         enable_logic_check=True で、最終化の後に論理一貫性の復元工程（_generate_logic_check）
         を適用する（既定: エンジンのコンストラクタ設定に従う。false なら従来動作のまま）。
         """
         if not drafts:
-            raise ValueError("統合対象の草案がありません")
+            raise ValueError("昇華対象の草案がありません")
         if enable_logic_check is None:
             enable_logic_check = self.enable_logic_check
         if method == "two-stage":
-            reconcile_user = _build_reconciliation_prompt(task, drafts)
-            reconciliation = _generate_reconciliation(
-                self.client, reconcile_user, temperature=self.draft_temperature
+            aufheben_user = _build_aufheben_prompt(task, drafts)
+            reconciliation = _generate_aufheben(
+                self.client, aufheben_user, temperature=self.draft_temperature
             )
             finalize_user = _build_finalize_prompt(task, reconciliation)
             artifact = _generate_finalize(self.client, finalize_user)
@@ -563,13 +588,13 @@ class DraftEngine:
         self, drafts: list[Draft], method: str = "two-stage", task: str = "",
         *, enable_logic_check: bool | None = None,
     ) -> str:
-        """複数の独立草案を統合して一段高い成果物を返す。
+        """複数の独立草案を昇華（アウフヘーベン）して一段高い成果物を返す。
 
-        - method="two-stage": 矛盾解決推理 → 最終化（2段階統合。温度: 推理 0.7 / 最終化 0.0）
-        - method="single-pass":  単発統合（1コール）
+        - method="two-stage": 弁証法的止揚 → 最終化（2段階昇華。温度: 止揚 0.9 / 最終化 0.0）
+        - method="single-pass":  単発昇華（1コール）
 
         drafts は外部草案（人間の専門家が書いた分析、別モデルの出力等）でもよい。
-        出所を問わず「複数の異なる視点」を突っ込めば一段高い統合を返す。
+        出所を問わず「複数の異なる視点」を突っ込めば一段高い昇華を返す。
         """
         _, artifact = self.synthesize_with_reconciliation(
             drafts, method=method, task=task, enable_logic_check=enable_logic_check

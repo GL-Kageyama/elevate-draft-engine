@@ -1,9 +1,9 @@
-"""比較ドキュメント生成: compare の出力ディレクトリから「素AI生成 vs 統合版」を読める形に。
+"""比較ドキュメント生成: compare の出力ディレクトリから「素AI生成 vs 昇華版」を読める形に。
 
-知恵の評議会の「統合優位性の実証」は、統計（CI）だけでなく、実際の成果物で
-素AI生成と統合版を並べて人間が客観的に読めること自体が目的である。
+知恵の評議会の「昇華優位性の実証」は、統計（CI）だけでなく、実際の成果物で
+素AI生成と昇華版を並べて人間が客観的に読めること自体が目的である。
 
-compare は run ごとに raw.md（素AI生成）と elevated.md（統合版）を保存する
+compare は run ごとに raw.md（素AI生成）と elevated.md（昇華版）を保存する
 （--runs>1 なら run_NN/ サブフォルダ）。このスクリプトはそれらを1つの
 comparison.md に束ね、スコア表つきで「どちらが読んでいて優れているか」を
 人間が判断できる形にする。
@@ -42,7 +42,7 @@ def _score_table(measurement: str) -> str:
 
 
 def _run_block(run_dir: Path, idx: int) -> list[str]:
-    """1 run 分の比較ブロック（素AI生成と統合版を並べて読める形）を組み立てる。"""
+    """1 run 分の比較ブロック（素AI生成と昇華版を並べて読める形）を組み立てる。"""
     raw = _read(run_dir / "raw.md").strip()
     elevated = _read(run_dir / "elevated.md").strip()
     baseline_eval = _read(run_dir / "evaluation_baseline.md").strip()
@@ -56,7 +56,7 @@ def _run_block(run_dir: Path, idx: int) -> list[str]:
     if baseline_eval:
         lines.append(f"**素AI生成の評価**\n\n```\n{baseline_eval}\n```")
     if elevated_eval:
-        lines.append(f"**統合版の評価**\n\n```\n{elevated_eval}\n```")
+        lines.append(f"**昇華版の評価**\n\n```\n{elevated_eval}\n```")
     if raw and elevated:
         lines.append(
             "### 素AI生成（raw.md）\n\n<details><summary>読む（クリックで展開）</summary>\n\n```markdown\n"
@@ -64,14 +64,14 @@ def _run_block(run_dir: Path, idx: int) -> list[str]:
             + "\n```\n\n</details>"
         )
         lines.append(
-            "### 統合版（elevated.md）\n\n<details><summary>読む（クリックで展開）</summary>\n\n```markdown\n"
+            "### 昇華版（elevated.md）\n\n<details><summary>読む（クリックで展開）</summary>\n\n```markdown\n"
             + elevated
             + "\n```\n\n</details>"
         )
     elif raw:
         lines.append(f"### 素AI生成（raw.md）\n\n```markdown\n{raw}\n```")
     elif elevated:
-        lines.append(f"### 統合版（elevated.md）\n\n```markdown\n{elevated}\n```")
+        lines.append(f"### 昇華版（elevated.md）\n\n```markdown\n{elevated}\n```")
     lines.append("")
     return lines
 
@@ -88,7 +88,7 @@ def render(out_dir: Path, task: str | None = None) -> str:
     score_block = _score_table(measurement) if measurement else ""
 
     lines = [
-        "# 比較: 素AI生成 vs 統合版",
+        "# 比較: 素AI生成 vs 昇華版",
         "",
         f"**タスク**: {task}",
         f"**保存先**: `{out_dir}`",
@@ -116,7 +116,7 @@ def render(out_dir: Path, task: str | None = None) -> str:
 def _html_of(md: str) -> str:
     """Markdown の比較ドキュメントから横並びHTMLを生成する（ブラウザで客観視用）。
 
-    完全なMarkdownパーサーは持たない。run ブロックの「素AI生成」/「統合版」を
+    完全なMarkdownパーサーは持たない。run ブロックの「素AI生成」/「昇華版」を
     2カラムに並べる軽量変換のみを行う。
     """
     from html import escape
@@ -130,7 +130,7 @@ def _html_of(md: str) -> str:
             in_raw, in_elev = True, False
             cur_raw, cur_elev = [], []
             continue
-        if line.startswith("### 統合版（elevated.md）"):
+        if line.startswith("### 昇華版（elevated.md）"):
             in_raw, in_elev = False, True
             continue
         if line.startswith("## ") or line.startswith("# "):
@@ -156,7 +156,7 @@ def _html_of(md: str) -> str:
     <pre style="white-space:pre-wrap;font-family:inherit;">{escape(raw.strip())}</pre>
   </div>
   <div style="flex:1;min-width:320px;border:1px solid #ccc;padding:1em;">
-    <h3 style="color:#3a3;">統合版</h3>
+    <h3 style="color:#3a3;">昇華版</h3>
     <pre style="white-space:pre-wrap;font-family:inherit;">{escape(elev.strip())}</pre>
   </div>
 </div>"""

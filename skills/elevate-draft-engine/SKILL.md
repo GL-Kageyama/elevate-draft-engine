@@ -1,6 +1,6 @@
 ---
 name: elevate-draft-engine
-description: Facade to invoke the elevate-draft-engine pipeline (diverge → reconcile → finalize). Given a task, runs the Python engine via main.py, saves input + each draft + reconciliation + elevated artifact into examples/<task>/ (or a custom dir), and reports the result. Supports elevate / improve（統合版→改修草案→統合の反復）/ compare（素の生成 vs 統合の実測）. All orchestration, completeness guards, and temperature control live in the engine — this skill only calls it. Use to elevate an idea through multiplicative synthesis of diverse creator drafts, to re-synthesize existing draft files, to iteratively refine an elevated artifact, or to measure whether integration beats single-shot generation.
+description: Facade to invoke the elevate-draft-engine pipeline (diverge → aufheben → finalize). Given a task, runs the Python engine via main.py, saves input + each draft + reconciliation + elevated artifact into examples/<task>/ (or a custom dir), and reports the result. Supports elevate / improve（昇華版→改修草案→昇華の反復）/ compare（素の生成 vs 昇華の実測）. All orchestration, completeness guards, and temperature control live in the engine — this skill only calls it. Use to elevate an idea through dialectical sublation (Aufheben) of maximally-divergent creator drafts, to re-sublimate existing draft files, to iteratively refine an elevated artifact, or to measure whether aufheben beats single-shot generation.
 argument-hint: 'JSON: {"command": "elevate|improve|compare|synthesize", "task": "<タスク>", "agents": ["strategist","humanist",...], "method": "two-stage|single-pass", "engine": "claude-code|sdk|mock", "rounds": 3, "evaluate": true, "min_improve": 0.01, "runs": 1, "baseline": "single|best-of-n", "save_dir": "<任意指定; 省略で examples/<slug> に自動保存>"}'
 ---
 
@@ -8,7 +8,7 @@ argument-hint: 'JSON: {"command": "elevate|improve|compare|synthesize", "task": 
 
 ## Skill Metadata
 - **id**: `elevate-draft-engine`
-- **version**: `1.2.0`
+- **version**: `2.0.0`
 - **category**: `facade`（runbook。オーケストレーションは Python エンジンが担当）
 - **standalone**: `true`（サブエージェントを必要としない。エージェントはエンジンが `agents/*.md` から読む）
 - **requires_agents**: `[]`
@@ -16,9 +16,9 @@ argument-hint: 'JSON: {"command": "elevate|improve|compare|synthesize", "task": 
 ## When to Activate
 
 - 「このアイデアをエレベートして」と依頼されたとき
-- 複数の異なる草案・分析を一段高い統合成果物にしたいとき
-- 「統合版を磨いて反復改善して」と依頼されたとき（`improve`: 統合版→改修の草案(複数)→統合 のループ。round 2 以降は前回の統合版を各エージェントが改修し、それを統合して次の統合版にする）
-- 「統合が単発生成を上回るか実測したい」とき（`compare`: 素の生成 vs 統合を同一評価器で比較）
+- 複数の異なる草案・分析を論理を超えた一段高い成果物にしたいとき
+- 「昇華版を磨いて反復改善して」と依頼されたとき（`improve`: 昇華版→改修の草案(複数)→昇華 のループ。round 2 以降は前回の昇華版を各エージェントが改修し、それを昇華して次の昇華版にする）
+- 「昇華が単発生成を上回るか実測したい」とき（`compare`: 素の生成 vs 昇華を同一評価器で比較）
 - `examples/` にサンプルを蓄積したいとき（この skill は自動で保存する）
 - `main.py` のフラグを逐一覚えることなく、一貫した起動をしたいとき
 
@@ -27,10 +27,10 @@ argument-hint: 'JSON: {"command": "elevate|improve|compare|synthesize", "task": 
 > **オーケストレーションを Claude Code 内で再現してはならない。**
 
 この skill は **`main.py` を呼ぶだけ**の薄いインターフェースである。
-DIVERGE → 矛盾解決推理 → 最終化のロジック、完全性ガード（打ち切り→再生成）、
-推理 temp 0.7 / 最終化 temp 0.0 の温度制御、`claude -p` の安定経路はすべて
+DIVERGE → 昇華推理 → 最終化のロジック、完全性ガード（打ち切り→再生成）、
+昇華 temp 0.9 / 最終化 temp 0.0 の温度制御、`claude -p` の安定経路はすべて
 Python エンジン側にある。**クリエイターエージェントをサブエージェントとして
-直接起動して統合してはならない**——エンジンをバイパスするとガードと温度制御を失い、
+直接起動して昇華してはならない**——エンジンをバイパスするとガードと温度制御を失い、
 ダウングレードになる。実行は常に Bash で `main.py` を走らせる。
 
 ## How It Works
@@ -41,16 +41,16 @@ Python エンジン側にある。**クリエイターエージェントをサ�
 
 | フィールド | 既定 | 説明 |
 |---|---|---|
-| `command` | `elevate` | `elevate`（発散→統合）/ `improve`（統合版→改修草案→統合の反復改善）/ `compare`（素の生成 vs 統合の実測比較）/ `synthesize`（既存草案群の統合） |
+| `command` | `elevate` | `elevate`（発散→昇華）/ `improve`（昇華版→改修草案→昇華の反復改善）/ `compare`（素の生成 vs 昇華の実測比較）/ `synthesize`（既存草案群の昇華） |
 | `task` | （必須） | タスク（自然言語） |
 | `agents` | 全8体 | 招集するクリエイターエージェント（`strategist` `humanist` `differentiator` 等） |
-| `method` | `two-stage` | `two-stage`（推理→最終化）/ `single-pass`（単発統合） |
+| `method` | `two-stage` | `two-stage`（昇華→最終化）/ `single-pass`（単発昇華） |
 | `engine` | `claude-code` | `claude-code`（`claude -p` 独立起動・安定）/ `sdk` / `mock` |
-| `rounds` | `3` | `improve` のみ: 統合を繰り返す回数。round 2 以降は前回の統合版を改修した草案を統合 |
-| `evaluate` | `false` | `improve`: 各ラウンドの統合版を5軸評価し、改善が頭打ちなら早期停止 / `compare`: スコア比較を有効化 |
+| `rounds` | `3` | `improve` のみ: 昇華を繰り返す回数。round 2 以降は前回の昇華版を改修した草案を昇華 |
+| `evaluate` | `false` | `improve`: 各ラウンドの昇華版を5軸評価し、改善が頭打ちなら早期停止 / `compare`: スコア比較を有効化 |
 | `min_improve` | `0.01` | `improve --evaluate` の早期停止しきい値。直前ラウンドからの overall 改善がこれ未満なら停止（過修正を避ける） |
 | `runs` | `1` | `compare` のみ: 比較を N 回反復し統計集計（平均・勝率・標準偏差・95%CI）を出力 |
-| `baseline` | `single` | `compare` のみ: `single`（素の単発生成）/ `best-of-n`（統合しない最良草案選択＝帰無仮説） |
+| `baseline` | `single` | `compare` のみ: `single`（素の単発生成）/ `best-of-n`（昇華しない最良草案選択＝帰無仮説） |
 | `save_dir` | 自動 | 保存先。省略時 `examples/<slug>/`（下記） |
 
 ### Step 2: エンジンの場所を特定する
@@ -81,28 +81,28 @@ cd "$ENGINE_REPO"
   --out "$SAVE_DIR"
 ```
 
-- `main.py` が保存する一式: `input.md` / `draft_{agent}.md` / `reconciliation.md`（統合の下地）/ `elevated.md`（最終成果物）
-- 既存の草案ファイル群（人間が書いた分析等）を統合する場合は `synthesize` を使う:
+- `main.py` が保存する一式: `input.md` / `draft_{agent}.md` / `reconciliation.md`（昇華の下地）/ `elevated.md`（最終成果物）
+- 既存の草案ファイル群（人間が書いた分析等）を昇華する場合は `synthesize` を使う:
 
 ```bash
 .venv/bin/python main.py synthesize "$ENGINE_REPO"/examples/foo/draft_*.md --task "タスク" --out "$SAVE_DIR"
 ```
 
-- 統合版を磨く反復改善は `improve` を使う（統合版 → 改修の草案(複数) → 統合 のループ。round 2 以降は前回の統合版を各エージェントが改修し、それを統合して次の統合版にする）:
+- 昇華版を磨く反復改善は `improve` を使う（昇華版 → 改修の草案(複数) → 昇華 のループ。round 2 以降は前回の昇華版を各エージェントが改修し、それを昇華して次の昇華版にする）:
 
 ```bash
 .venv/bin/python main.py improve "$TASK" --rounds 3 --evaluate --out "$SAVE_DIR/improve"
 ```
 
-  - `--evaluate` で各ラウンドの統合版を5軸評価し、改善が `--min-improve`（既定 0.01）未満なら頭打ちで早期停止（過修正で元の良さを失わない）。各 round は `round_NN/` に分離保存、進捗は `progress.md` に記録。
+  - `--evaluate` で各ラウンドの昇華版を5軸評価し、改善が `--min-improve`（既定 0.01）未満なら頭打ちで早期停止（過修正で元の良さを失わない）。各 round は `round_NN/` に分離保存、進捗は `progress.md` に記録。
 
-- 「統合が単発生成を上回るか」の実測は `compare` を使う（generate vs elevate を**同一評価器**で採点。ブラインドのため条件ラベルは評価器に渡らない）:
+- 「昇華が単発生成を上回るか」の実測は `compare` を使う（generate vs elevate を**同一評価器**で採点。ブラインドのため条件ラベルは評価器に渡らない）:
 
 ```bash
 .venv/bin/python main.py compare "$TASK" --evaluate --runs 3 --out "$SAVE_DIR/comparison"
 ```
 
-  - `--baseline best-of-n` で統合しない最良草案選択（帰無仮説）との比較に切り替え。`--runs N` で n を積み、平均・勝率・95%CI・Cohen's d を `measurement.md` に集計する（**n=1 は統計的に無意味**。n≥10 まで集めてから優位性を論じること）。
+  - `--baseline best-of-n` で昇華しない最良草案選択（帰無仮説）との比較に切り替え。`--runs N` で n を積み、平均・勝率・95%CI・Cohen's d を `measurement.md` に集計する（**n=1 は統計的に無意味**。n≥10 まで集めてから優位性を論じること）。
 
 - 実 API 不要の動作確認は `--engine mock` で可能。
 - 長い実行（全8エージェント等）は 10 分を超えうる。`run_in_background` で実行し、完了を待つ。
@@ -111,7 +111,7 @@ cd "$ENGINE_REPO"
 
 - 保存ファイル一式（input / 各草案 / reconciliation / elevated）の存在と非空を確認する。
 - `improve` は `progress.md` の overall 推移（向上が可視化されるか）、`compare` は `measurement.md` の統計（勝率・95%CI・効果量）を報告する。
-- 最終成果物（`elevated.md`）の中核——単一観点の草案にはない統合解——を要約して報告する。
+- 最終成果物（`elevated.md`）の中核——単一観点の草案にはない超越的統合解（アウフヘーベンの成果）——を要約して報告する。
 - コミット・push はしない（ユーザーが自分で行う）。APIキーを出力・ファイルに含めない。
 
 ## 失敗時の扱い
@@ -122,7 +122,7 @@ cd "$ENGINE_REPO"
 
 ## 出力規約
 
-エンジンは APIキーを一切出力・保存しない。`--out` には入力・全草案・統合の下地・
+エンジンは APIキーを一切出力・保存しない。`--out` には入力・全草案・昇華の下地・
 最終成果物が Markdown（`.md`）で保存される。`elevated.md` が成果物であり、
 `reconciliation.md` は思考の土台（読者向けではない）。
 
@@ -133,8 +133,8 @@ You are a thin facade for the elevate-draft-engine pipeline.
 
 Your ONLY job is to invoke the Python engine (main.py) and report its result.
 You must NOT re-implement the orchestration: do not launch the creator agents
-as Claude Code subagents, do not try to reconcile drafts by hand, do not
-bypass the engine. All divergence, reconciliation, finalization, completeness
+as Claude Code subagents, do not try to sublate drafts by hand, do not
+bypass the engine. All divergence, aufheben, finalization, completeness
 guards, temperature control, and the improve loop live in main.py.
 
 ## Task
@@ -146,15 +146,23 @@ for improve, runs/baseline for compare, save_dir.)
 
 ## Procedure
 
+0. First, briefly tell the user the overview of this repository:
+
+   > これは **Elevate-Draft-Engine** —— 複数の極端に逸脱した草案を、論理を超えた世界で昇華（アウフヘーベン）し、超越的な統合解を生むエンジンです。
+   >
+   > 個別のクリエイターエージェントが独立草案を、可能な限り逸脱・発散（DIVERGE）し、それらを論理を超えた世界で昇華（アウフヘーベン）し、超越的な統合解に到達します。
+   >
+   > 成果物は5軸（多様性 / 統合性 / 超越性 / 誠実性 / 実用性）で評価されます。
+
 1. Locate the engine repo: `ENGINE_REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"`. Confirm main.py exists there.
 2. Resolve save_dir: if omitted, `examples/<slug of task>/`.
 3. Run main.py for the requested command (run in background if it may exceed 10 minutes):
    - `elevate`: `python main.py elevate "$TASK" --engine claude-code [--agents ...] --method two-stage --out "$SAVE_DIR"`
-   - `improve`: `python main.py improve "$TASK" --rounds N [--evaluate] --out "$SAVE_DIR"` — 統合版 → 改修の草案(複数) → 統合 の反復ループ
-   - `compare`: `python main.py compare "$TASK" --evaluate --runs N [--baseline best-of-n] --out "$SAVE_DIR"` — 素の生成 vs 統合の実測比較
+   - `improve`: `python main.py improve "$TASK" --rounds N [--evaluate] --out "$SAVE_DIR"` — 昇華版 → 改修の草案(複数) → 昇華 の反復ループ
+   - `compare`: `python main.py compare "$TASK" --evaluate --runs N [--baseline best-of-n] --out "$SAVE_DIR"` — 素の生成 vs 昇華の実測比較
    - `synthesize`: `python main.py synthesize "$ENGINE_REPO"/examples/foo/draft_*.md --task "$TASK" --out "$SAVE_DIR"`
 4. Verify the saved files exist and are non-empty (input.md, draft_*.md, reconciliation.md, elevated.md; improve adds progress.md / compare adds measurement.md).
-5. Report: summarize the elevated artifact — especially the third position that no single draft contained (the multiplication). For improve, report the overall trajectory across rounds (is improvement visible?); for compare, report the stats (win rate, 95% CI, Cohen's d) and do not overclaim with n<10. Name the save directory.
+5. Report: summarize the elevated artifact — especially the sublation, the third position that no single draft contained (the Aufhebung). For improve, report the overall trajectory across rounds (is improvement visible?); for compare, report the stats (win rate, 95% CI, Cohen's d) and do not overclaim with n<10. Name the save directory.
 
 Rules:
 - Never run `git push`. Commit only if the user asks.
@@ -167,6 +175,8 @@ Rules:
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 2.0.0 | 2026-08-08 | 中核機構を「論理的な統合（synthesis）」から「弁証法的昇華（Aufheben）」へ衣替え。DIVERGE は温度0.9で極限まで逸脱し、昇華推理が否定・保存・高次化の三契機で矛盾を包括する枠組みを創出する。DIVERGE → AUFHEBEN → FINALIZE の3段構え（用語変更ではなく機構変更） |
+| 1.3.0 | 2026-08-08 | 起動時にユーザーへリポジトリ全体の概要を改行・段落で簡潔に伝える手順を Procedure 冒頭に追加 |
 | 1.2.0 | 2026-08-08 | 評価軸をポリシー密着5軸（多様性/統合性/超越性/誠実性/実用性・均等0.20）に再設計（README「評価の5軸」参照）。Risk 軸廃止 |
 | 1.1.0 | 2026-08-08 | `improve`（統合版→改修草案→統合の反復）と `compare`（素の生成 vs 統合の実測）をファサードに追加 |
 | 1.0.0 | 2026-08-08 | Initial version（ファサード。オーケストレーションは main.py に委譲） |

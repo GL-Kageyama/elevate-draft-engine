@@ -4,7 +4,7 @@ DraftEngine の公開API（generate / diverge / synthesize / elevate / エージ
 検証する。プロンプトの実測観察に依存しすぎないよう、呼出数・温度・引数構成・
 中間思考の非混入を検証する。
 
-検証対象: elevate/engine.py（DIVERGE → SYNTHESIZE の2段構え）
+検証対象: elevate/engine.py（DIVERGE → AUFHEBEN → FINALIZE の2段構え）
 エージェントは agents/*.md から読込まれる（正本はファイル）。
 """
 
@@ -20,9 +20,9 @@ from elevate.engine import (  # noqa: E402
     ANALYSIS_SYSTEM,
     FINALIZE_SYSTEM,
     LOGIC_CHECK_SYSTEM,
-    RECONCILIATION_SYSTEM,
+    AUFHEBEN_SYSTEM,
     SYNTHESIS_SYSTEM,
-    SYNTHESIS_MAX_ATTEMPTS,
+    AUFHEBEN_MAX_ATTEMPTS,
     _detect_sentimentality,
     _strip_strong_claim,
     load_agents,
@@ -49,12 +49,12 @@ class MockGenerator:
 
     def generate(self, system: str, user: str, *, temperature: float | None = None) -> str:
         self.calls.append({"system": system, "user": user, "temperature": temperature})
-        if "矛盾解決推理" in system:
-            # 推理は長さ基準（30字以上）で判定される
+        if "Aufheben" in system:
+            # 昇華推理は長さ基準（30字以上）で判定される
             return (
-                "草案間の対立は「価値の最大化と実現性の担保」という軸に集約される。"
-                "解決仮説として、最小単位で制度に埋め込み、実証データで価値の主張を強化する。"
-                "この統合は単一観点の草案にはない解を構成する。"
+                "草案間の対立は「価値の最大化と実現性の担保」という軸に集約されるが、"
+                "弁証法的止揚（アウフヘーベン）により両者は一段高い次元で統合される。"
+                "否定・保存・高次化の三契機を経て、この昇華は単一観点の草案にはない解を構成する。"
             )
         return (
             "完全な分析である。Target は明確、Value は実現可能、Risk は具体的な対策つき、"
@@ -125,9 +125,9 @@ def test_load_agents_parses_frontmatter_name_and_body() -> None:
 def test_agents_mandate_draft_frame() -> None:
     """各エージェントは草案末尾に「最強の主張」の定型を要求する。
 
-    reconcile が「各草案の最強の主張」を推測に頼らず確実に拾うための軽い枠。
-    「反論されそうな点」は含めない——草案に弱点を先読みさせると自由な論述が
-    萎縮するため、反論の検出は統合段階の reconciler に任せる（不要・干渉）。
+    昇華（Aufheben）が「各草案の最強の主張」を推測に頼らず確実に拾うための軽い枠。
+    「反論されそうな点」は含めない——草案に弱点を先読みさせると自由な逸脱が
+    萎縮するため、反論の検出は昇華段階の Aufheber に任せる（不要・干渉）。
     """
     agents = load_agents()
     for name, prompt in agents.items():
@@ -220,11 +220,11 @@ def test_diverge_without_strong_claim_passes_stripped_prompt() -> None:
 def test_diverge_generates_one_draft_per_agent() -> None:
     """diverge() は登録済み全エージェントで草案を生成し、エージェント名と温度を渡す。"""
     client = MockGenerator()
-    engine = DraftEngine(client, draft_temperature=0.7)
+    engine = DraftEngine(client, draft_temperature=0.9)
     drafts = engine.diverge("タスク")
     assert [d.agent for d in drafts] == DEFAULT_AGENTS
     assert len(client.calls) == 8
-    assert all(c["temperature"] == 0.7 for c in client.calls)
+    assert all(c["temperature"] == 0.9 for c in client.calls)
     assert all(d.content for d in drafts)
 
 
@@ -335,23 +335,23 @@ def test_diverge_draft_dir_truncates_on_regeneration(tmp_path) -> None:
 # ---- SYNTHESIZE（核心） ----
 
 def test_synthesize_two_stage_reconcile_then_finalize() -> None:
-    """two-stage: 推理（RECONCILIATION）→ 最終化（FINALIZE）の2回呼び。"""
+    """two-stage: 昇華（AUFHEBEN）→ 最終化（FINALIZE）の2回呼び。"""
     client = MockGenerator()
     engine = DraftEngine(client)
     drafts = _draft_pair()
     out = engine.synthesize(drafts)
     assert len(client.calls) == 2
-    assert RECONCILIATION_SYSTEM in client.calls[0]["system"]
+    assert AUFHEBEN_SYSTEM in client.calls[0]["system"]
     assert ANALYSIS_SYSTEM in client.calls[1]["system"] and FINALIZE_SYSTEM in client.calls[1]["system"]
     assert out
 
 
 def test_synthesize_two_stage_reconcile_uses_draft_temperature_finalize_zero() -> None:
-    """推理は温度 0.7（深度）、最終化は 0.0（一貫性）。"""
+    """昇華推理は温度 0.9（極限の逸脱）、最終化は 0.0（一貫性）。"""
     client = MockGenerator()
-    engine = DraftEngine(client, draft_temperature=0.7)
+    engine = DraftEngine(client, draft_temperature=0.9)
     engine.synthesize(_draft_pair())
-    assert client.calls[0]["temperature"] == 0.7
+    assert client.calls[0]["temperature"] == 0.9
     assert client.calls[1]["temperature"] is None  # 既定温度（0.0）
 
 
@@ -377,7 +377,7 @@ def test_synthesize_finalize_excludes_draft_content() -> None:
 
 
 def test_synthesize_single_pass_single_call() -> None:
-    """single-pass: 単発統合（1回呼び）。"""
+    """single-pass: 単発昇華（1回呼び）。"""
     client = MockGenerator()
     engine = DraftEngine(client)
     out = engine.synthesize(_draft_pair(), method="single-pass")
@@ -415,7 +415,7 @@ def test_synthesize_unknown_method_raises() -> None:
 def test_elevate_runs_diverge_then_synthesize() -> None:
     """elevate() = diverge（全エージェント）+ synthesize（推理・最終化）。"""
     client = MockGenerator()
-    engine = DraftEngine(client, draft_temperature=0.7)
+    engine = DraftEngine(client, draft_temperature=0.9)
     out = engine.elevate("タスク")
     assert len(client.calls) == 8 + 2
     assert out
@@ -424,7 +424,7 @@ def test_elevate_runs_diverge_then_synthesize() -> None:
 # ---- 完全性ガード（broken output → regenerate） ----
 
 def test_diverge_regenerates_when_draft_truncated() -> None:
-    """草案が文途中で打ち切られたら再生成する（打ち切り草案を統合に流さない）。"""
+    """草案が文途中で打ち切られたら再生成する（打ち切り草案を昇華に流さない）。"""
     client = FlakyGenerator(n_broken=1)
     engine = DraftEngine(client)
     drafts = engine.diverge("タスク", agents=["strategist", "humanist"])
@@ -471,7 +471,7 @@ def test_finalize_regenerates_when_incomplete() -> None:
 
 
 def test_synthesis_regenerates_when_incomplete() -> None:
-    """単発統合（single-pass）が打ち切られたら再生成する。"""
+    """単発昇華（single-pass）が打ち切られたら再生成する。"""
     client = FlakyGenerator(n_broken=1)
     engine = DraftEngine(client)
     out = engine.synthesize(_draft_pair(), method="single-pass")
@@ -485,7 +485,7 @@ def test_completeness_guard_raises_after_max_attempts() -> None:
     engine = DraftEngine(client)
     with pytest.raises(RuntimeError, match="打ち切り/不完全"):
         engine.synthesize(_draft_pair())
-    assert client.calls == SYNTHESIS_MAX_ATTEMPTS
+    assert client.calls == AUFHEBEN_MAX_ATTEMPTS
 
 
 # ---- 論理一貫性の復元工程（--logic-check） ----
@@ -544,7 +544,7 @@ def test_detect_sentimentality_natural_text_not_detected() -> None:
 # ---- 具体性保存指数（evaluation/specificity.py） ----
 
 def test_preservation_rate_counts_surviving_concrete_tokens() -> None:
-    """発散草案の具体トークン（カタカナ・数字・英単語）が統合にどれだけ残るか。"""
+    """発散草案の具体トークン（カタカナ・数字・英単語）が昇華にどれだけ残るか。"""
     from evaluation.specificity import compute_preservation_rate
 
     drafts = [
@@ -552,7 +552,7 @@ def test_preservation_rate_counts_surviving_concrete_tokens() -> None:
         Draft(agent="humanist", content="見捨てられた73歳の祖父をAIが見守る。"),
     ]
     # elevated: カタカナ語（ゾンビ・ナレッジ・AI）、数字（0・73）は一部残る
-    elevated = "ナレッジAIでゾンビ知識を0件にし、高齢者を見守る統合案である。"
+    elevated = "ナレッジAIでゾンビ知識を0件にし、高齢者を見守る昇華案である。"
     result = compute_preservation_rate(drafts, elevated)
     assert result["preservation_rate"] is not None
     assert 0.0 < result["preservation_rate"] < 1.0
@@ -569,7 +569,7 @@ def test_preservation_rate_empty_source_resilient() -> None:
     from evaluation.specificity import compute_preservation_rate
 
     drafts = [Draft(agent="designer", content="おはようございます。")]  # カタカナ・数字・英単語なし
-    result = compute_preservation_rate(drafts, "統合成果物。")
+    result = compute_preservation_rate(drafts, "昇華成果物。")
     assert result["preservation_rate"] is None
     assert result["source_tokens"] == []
 

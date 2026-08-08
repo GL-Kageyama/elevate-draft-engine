@@ -1,7 +1,7 @@
 """render_comparison.py のテスト。
 
 compare 出力（raw.md / elevated.md / measurement.md / run_NN/）から
-「素AI生成 vs 統合版」の比較ドキュメントを生成する機能を検証する。
+「素AI生成 vs 昇華版」の比較ドキュメントを生成する機能を検証する。
 """
 
 import sys
@@ -19,7 +19,7 @@ def _make_flat(out: Path, task: str = "サンプルタスク") -> Path:
     out.mkdir(parents=True, exist_ok=True)
     (out / "input.md").write_text(f"# タスク\n\n{task}\n")
     (out / "raw.md").write_text("素AI生成の出力です。")
-    (out / "elevated.md").write_text("統合版の出力です。")
+    (out / "elevated.md").write_text("昇華版の出力です。")
     return out
 
 
@@ -36,7 +36,7 @@ def _make_runs(out: Path) -> Path:
         run = out / f"run_{n}"
         run.mkdir(parents=True, exist_ok=True)
         (run / "raw.md").write_text(f"run{n} の素AI生成。")
-        (run / "elevated.md").write_text(f"run{n} の統合版。")
+        (run / "elevated.md").write_text(f"run{n} の昇華版。")
         (run / "evaluation_baseline.md").write_text(f"baseline overall=0.7{n}（Pass）")
         (run / "evaluation_elevated.md").write_text(f"elevated overall=0.8{n}（Pass）")
     return out
@@ -58,7 +58,7 @@ def test_render_flat_includes_both_texts(tmp_path) -> None:
     md = render_comparison.render(out)
     assert "サンプルタスク" in md
     assert "素AI生成" in md and "素AI生成の出力です。" in md
-    assert "統合版" in md and "統合版の出力です。" in md
+    assert "昇華版" in md and "昇華版の出力です。" in md
 
 
 def test_render_runs_includes_measurement_and_each_run(tmp_path) -> None:
@@ -84,5 +84,5 @@ def test_html_output_wraps_both_columns(tmp_path) -> None:
     out = _make_flat(tmp_path)
     md = render_comparison.render(out)
     html = render_comparison._html_of(md)
-    assert "素AI生成" in html and "統合版" in html
+    assert "素AI生成" in html and "昇華版" in html
     assert "flex" in html  # 横並び表示

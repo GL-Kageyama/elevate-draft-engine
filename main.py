@@ -3,16 +3,16 @@
 使い方:
     python main.py generate "タスク"                 # 素のAI（単発生成）, 1 call
     python main.py diverge "タスク"                  # 8エージェントで草案生成・一覧出力
-    python main.py synthesize draft1.md draft2.md  # 外部草案を統合（核心）
+    python main.py synthesize draft1.md draft2.md  # 外部草案を昇華（核心）
     python main.py elevate "タスク"                  # diverge → synthesize 一気
     python main.py compare "タスク"                  # generate vs elevate 両方出力
     python main.py compare "タスク" --evaluate       # + 5軸評価でスコア比較
-    python main.py improve "タスク" --rounds 3       # 統合版→改修の草案→統合 のループで反復改善
+    python main.py improve "タスク" --rounds 3       # 昇華版→改修の草案→昇華 のループで反復改善
     python main.py improve "タスク" --rounds 3 --evaluate  # + 各ラウンド採点・頭打ちで早期停止
 
 共通オプション:
     --mock                API 不要のモックで実行（パイプライン確認用）
-    --method two-stage|single-pass      統合方式（既定 two-stage: 矛盾解決推理→最終化）
+    --method two-stage|single-pass      昇華方式（既定 two-stage: 弁証法的止揚→最終化）
     --agents 名前...      使用するエージェントを限定（既定: 全8エージェント）
     --out DIR             成果物をファイル保存（省略時は outputs/{タスク名}/ にデフォルト保存）
                           elevate/compare は各草案 draft_{agent}.md も保存
@@ -38,17 +38,17 @@ def _build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--mock", action="store_true", help="API を使わずモックで実行")
     common.add_argument("--engine", default="sdk", choices=["sdk", "claude-code"], help="生成エンジン（既定 sdk。claude-code は claude -p 起動で安定）")
-    common.add_argument("--method", default="two-stage", choices=["two-stage", "single-pass"], help="統合方式（既定 two-stage）")
+    common.add_argument("--method", default="two-stage", choices=["two-stage", "single-pass"], help="昇華方式（既定 two-stage）")
     common.add_argument("--agents", nargs="+", default=None, help="使用するエージェント（既定: 全エージェント）")
     common.add_argument("--out", type=Path, default=None, help="成果物を保存するディレクトリ（省略時は outputs/{タスク名}/ にデフォルト保存）")
-    common.add_argument("--no-strong-claim", action="store_true", help="エージェントから「最強の主張」断言枠を除去（アブレーション: 枠あり/なしの統合品質差を測定）")
+    common.add_argument("--no-strong-claim", action="store_true", help="エージェントから「最強の主張」断言枠を除去（アブレーション: 枠あり/なしの昇華品質差を測定）")
     common.add_argument("--runs", type=int, default=1, help="compare の比較を N 回反復して統計集計（平均・勝率・標準偏差・95%信頼区間）を出力（既定 1）")
-    common.add_argument("--baseline", default="single", choices=["single", "best-of-n"], help="compare の比較対象ベースライン（既定 single: 素の単発生成 / best-of-n: 統合なし最良草案選択＝帰無仮説）")
-    common.add_argument("--logic-check", action="store_true", help="最終化の後に論理一貫性の復元工程を適用（統合の多様化への偏りへの収束工程。既定は無効。旧5軸実測由来）")
+    common.add_argument("--baseline", default="single", choices=["single", "best-of-n"], help="compare の比較対象ベースライン（既定 single: 素の単発生成 / best-of-n: 昇華なし最良草案選択＝帰無仮説）")
+    common.add_argument("--logic-check", action="store_true", help="最終化の後に論理一貫性の復元工程を適用（昇華の多様化への偏りへの収束工程。既定は無効。旧5軸実測由来）")
 
     p = argparse.ArgumentParser(
         prog="elevate-draft-engine",
-        description="複数の独立した草案を統合して一段高い成果物を生むエンジン",
+        description="複数の独立した草案を論理を超えた世界で昇華（アウフヘーベン）して一段高い成果物を生むエンジン",
     )
     sub = p.add_subparsers(dest="command", required=True)
 
@@ -60,9 +60,9 @@ def _build_parser() -> argparse.ArgumentParser:
     d.add_argument("task", help="タスク")
     d.set_defaults(func=cmd_diverge)
 
-    s = sub.add_parser("synthesize", parents=[common], help="外部草案ファイル群を統合（核心）")
+    s = sub.add_parser("synthesize", parents=[common], help="外部草案ファイル群を昇華（核心）")
     s.add_argument("draft_files", nargs="+", type=Path, help="草案テキストファイル（エージェント名=ファイル名の拡張子なし）")
-    s.add_argument("--task", default="", help="元のタスク（任意。統合文脈として使う）")
+    s.add_argument("--task", default="", help="元のタスク（任意。昇華文脈として使う）")
     s.set_defaults(func=cmd_synthesize)
 
     e = sub.add_parser("elevate", parents=[common], help="diverge → synthesize を一気に")
@@ -77,11 +77,11 @@ def _build_parser() -> argparse.ArgumentParser:
 
     imp = sub.add_parser(
         "improve", parents=[common],
-        help="統合版を反復改善: 統合版→改修の草案(複数)→統合 のループで磨く",
+        help="昇華版を反復改善: 昇華版→改修の草案(複数)→昇華 のループで磨く",
     )
     imp.add_argument("task", help="タスク")
-    imp.add_argument("--rounds", type=int, default=3, help="統合を繰り返す回数（既定 3）")
-    imp.add_argument("--evaluate", action="store_true", help="各ラウンドの統合版を5軸評価し、改善が頭打ちなら早期停止")
+    imp.add_argument("--rounds", type=int, default=3, help="昇華を繰り返す回数（既定 3）")
+    imp.add_argument("--evaluate", action="store_true", help="各ラウンドの昇華版を5軸評価し、改善が頭打ちなら早期停止")
     imp.add_argument("--min-improve", type=float, default=0.01,
                     help="--evaluate 時の早期停止しきい値。直前ラウンドからの overall 改善がこれ未満なら停止（既定 0.01）")
     imp.set_defaults(func=cmd_improve)
@@ -105,11 +105,11 @@ _PERSONA_NAME_RE = re.compile(r"You are the \*\*([A-Za-z]+)\*\*")
 
 
 def _mock_revision_marker(user: str) -> str:
-    """改修ラウンド（前回の統合版を磨く）の改善マーカーを返す。
+    """改修ラウンド（前回の昇華版を磨く）の改善マーカーを返す。
 
-    改修草案を含む user プロンプトを生成する段（推理・最終化・単発統合）が、既に読まれた
-    改修度（改修度N）を引き継ぎ +1 して出力に埋め込む。MockEvaluator が統合版に残った
-    改修度の最大値で加点するため、統合版が磨かれるごとに overall が上昇し、改善が可視化
+    改修草案を含む user プロンプトを生成する段（止揚推理・最終化・単発昇華）が、既に読まれた
+    改修度（改修度N）を引き継ぎ +1 して出力に埋め込む。MockEvaluator が昇華版に残った
+    改修度の最大値で加点するため、昇華版が磨かれるごとに overall が上昇し、改善が可視化
     できる（round 1 は改修対象を持たず空文字 → 素の生成と同点）。
     改修ラウンド以外は空文字を返し、モック出力の従来形状を一切変えない。
     """
@@ -117,7 +117,7 @@ def _mock_revision_marker(user: str) -> str:
         return ""
     prev_core = user.split("改修草案", 1)[1][:40]
     n = user.count("改修度") + 1
-    return f" 改修草案の骨子（改修度{n}、{prev_core}…）を統合し、前回の統合版より精緻な解を構成する。"
+    return f" 改修草案の骨子（改修度{n}、{prev_core}…）を昇華し、前回の昇華版より精緻な解を構成する。"
 
 
 class MockGenerator:
@@ -142,28 +142,30 @@ class MockGenerator:
             m = _PERSONA_NAME_RE.search(system)
             name = m.group(1).lower() if m else "unknown"
             text = f"これはエージェント「{name}」からのモック草案である。{name}らしい観点で描かれている。"
-            # 改修ラウンド（round 2 以降）: 前回の統合版の骨子を引き継ぐ改修草案を返す。
-            # モック上、統合版を磨くループの「改善の可視化」を再現するマーカーで、既に読まれて
+            # 改修ラウンド（round 2 以降）: 前回の昇華版の骨子を引き継ぐ改修草案を返す。
+            # モック上、昇華版を磨くループの「改善の可視化」を再現するマーカーで、既に読まれて
             # いる改修度（改修度N）を引き継ぎ+1して次段へ渡す（実APIの改善過程の決定的な模倣）。
-            if "改修対象: 前回の統合版" in user:
-                prev_core = user.split("【改修対象: 前回の統合版】", 1)[1].split("。", 1)[0][:40]
+            if "改修対象: 前回の昇華版" in user:
+                prev_core = user.split("【改修対象: 前回の昇華版】", 1)[1].split("。", 1)[0][:40]
                 n = user.count("改修度") + 1
-                text += f" 改修草案（改修度{n}）として、前回の統合版「{prev_core}…」の骨子を引き継ぎ磨き上げる。"
-        # 矛盾解決推理: 長さ基準（最小30字）を満たす推理らしい文を返す
-        elif "矛盾解決推理" in system:
+                text += f" 改修草案（改修度{n}）として、前回の昇華版「{prev_core}…」の骨子を引き継ぎ磨き上げる。"
+        # 昇華推理（Aufheben）: 長さ基準（最小30字）を満たす止揚推理らしい文を返す
+        elif "Aufheben" in system:
             text = (
-                "草案間の対立は「価値の最大化と実現性の担保」という軸に集約される。"
-                "解決仮説として、まず最小の実現単位で制度に埋め込み、蓄積された実証データで"
-                "価値の主張を順次強化する。この統合は単一観点の草案にはない解を構成する。"
+                "草案間の対立は「価値の最大化と実現性の担保」という軸に集約されるが、"
+                "弁証法的止揚（アウフヘーベン）により、両者は一段高い次元で統合される。"
+                "否定: 各立場の一面的真理を限定。保存: 両者の本物の洞察を継承。"
+                "高次化: 制度への最小埋込が価値を増幅する構造へ。"
+                "この昇華は単一観点の草案にはない解を構成する。"
             )
             text += _mock_revision_marker(user)
-        # それ以外（素の生成・単発統合・矛盾解決推理が system に無い実測・最終化）:
+        # それ以外（素の生成・単発昇華・Aufheben が system に無い実測・最終化）:
         # 文終端記号で終わる完全な文を返す
         else:
             text = (
                 "これは与えられたタスクに対するモックの完全な分析である。"
-                "Target は明確であり、Value は実現可能、Risk は具体的な対策とともに示され、"
-                "Opportunity は拡張性を持つ。以上が統合された結論である。"
+                "具体的な洞察を含み、実行への手がかりを持つ。"
+                "以上が到達した結論である。"
             )
             text += _mock_revision_marker(user)
         # ストリーム追記用: 全文が揃った時点で1回だけ流す（SDK クライアントと同じ動作）
@@ -178,10 +180,10 @@ class MockEvaluator:
     best-of-n ベースラインが意味を持つよう、成果物テキストごとに決定的に異なるスコアを
     返す（同じテキストなら常に同じ overall）。「モック草案」を含むテキストは、
     エージェント名（全文に現れる）のハッシュで 0.5〜0.9 に分布させる。それ以外の
-    （素の生成・統合成果物）は、ポリシー密着5軸（2026-08-08 再調整(3)）に合わせ
-    「普通」を 0.60 に置く。さらに improve の改修ラウンド（統合版を磨く）を再現する
-    ため、統合版に残った改修度（改修度N）で加点し 0.72（改修度3）で頭打ちにする——
-    素の生成相当（round 1）→ 統合版が磨かれるごとに上昇 → 頭打ち、と改善の推移が
+    （素の生成・昇華成果物）は、ポリシー密着5軸（2026-08-08 再調整(3)）に合わせ
+    「普通」を 0.60 に置く。さらに improve の改修ラウンド（昇華版を磨く）を再現する
+    ため、昇華版に残った改修度（改修度N）で加点し 0.72（改修度3）で頭打ちにする——
+    素の生成相当（round 1）→ 昇華版が磨かれるごとに上昇 → 頭打ち、と改善の推移が
     決定的に可視化できる（5軸とも同一 base のため overall = base）。
     """
 
@@ -200,8 +202,8 @@ class MockEvaluator:
             base = 0.5 + (sum(ord(c) for c in name) % 40) / 100.0  # 0.50〜0.89
             scores = {"diversity": base, "synthesis": base, "elevation": base, "honesty": base, "utility": base}
         else:
-            # 素の生成・統合成果物: 「普通」=0.60。統合版に残った改修度（改修度N）で加点し、
-            # 改修度3で頭打ち → 素の生成相当（round 1）→ 統合版が磨かれるごとに上昇 → 頭打ち。
+            # 素の生成・昇華成果物: 「普通」=0.60。昇華版に残った改修度（改修度N）で加点し、
+            # 改修度3で頭打ち → 素の生成相当（round 1）→ 昇華版が磨かれるごとに上昇 → 頭打ち。
             degrees = [int(m) for m in re.findall(r"改修度(\d+)", system)]
             base = 0.60 + 0.04 * min(max(degrees, default=0), 3)  # 0.60〜0.72
             scores = {"diversity": base, "synthesis": base, "elevation": base, "honesty": base, "utility": base}
@@ -281,7 +283,7 @@ def _resolve_out(args: argparse.Namespace, task: str) -> argparse.Namespace:
     """--out 未指定時のデフォルト保存先を args.out に設定する。
 
     「生成時にファイルの逐次作成をデフォルトにする」ため、--out が無くても
-    outputs/{タスク名}/ に全成果物（草案・推理・統合成果物・素の生成）を保存する。
+    outputs/{タスク名}/ に全成果物（草案・推理・昇華成果物・素の生成）を保存する。
     --out 指定時は従来どおりその場所へ。
     """
     if args.out is None:
@@ -349,7 +351,7 @@ def cmd_synthesize(args: argparse.Namespace) -> None:
     )
     if reconciliation:
         _save(args, "reconciliation", reconciliation)
-    _print_artifact(f"統合成果物（{args.method}）", elevated)
+    _print_artifact(f"昇華成果物（{args.method}）", elevated)
     _save(args, "elevated", elevated)
 
 
@@ -404,9 +406,9 @@ def _save_evaluation_record(path: Path, label: str, result, evaluator) -> None:
 
 
 def _best_of_n(evaluator, drafts: list[Draft], task: str, *, verbose: bool = False) -> tuple[Draft, float]:
-    """帰無仮説ベースライン: 統合せず全草案を評価し、最高 overall の草案を選ぶ。
+    """帰無仮説ベースライン: 昇華せず全草案を評価し、最高 overall の草案を選ぶ。
 
-    統合（reconcile → finalize）の付加価値を分離して測るための比較対象。
+    昇華（aufheben → finalize）の付加価値を分離して測るための比較対象。
     各草案の評価スコアがそのまま best-of-N の実現値になる（選ばれた草案のスコアを
     報告する。選択時の評価を再評価で上書きしない——評価は盲検化されているため）。
     """
@@ -476,7 +478,7 @@ def _wilson_interval(wins: int, n: int, z: float = 1.96) -> tuple[float, float]:
 
 
 def _cohens_d(baseline: list[float], elevated: list[float]) -> float:
-    """統合 vs ベースラインの平均差の効果量（プール標準偏差で正規化）。"""
+    """昇華 vs ベースラインの平均差の効果量（プール標準偏差で正規化）。"""
     n1, n2 = len(baseline), len(elevated)
     if n1 < 2 or n2 < 2:
         return float("nan")
@@ -542,7 +544,7 @@ def cmd_compare(args: argparse.Namespace) -> None:
         _save(run_args, "raw" if run_args.baseline == "single" else "best_single", baseline)
         _save(run_args, "elevated", elevated)
 
-        # 具体性保存指数: 発散草案の具体トークンが統合成果物に残存する割合（--evaluate 時のみ集計）
+        # 具体性保存指数: 発散草案の具体トークンが昇華成果物に残存する割合（--evaluate 時のみ集計）
         if args.evaluate:
             from evaluation.specificity import compute_preservation_rate
 
@@ -597,7 +599,7 @@ def cmd_compare(args: argparse.Namespace) -> None:
         if preservation_rates:
             pmean = sum(preservation_rates) / len(preservation_rates)
             summary_lines.append(
-                f"具体性保存率（発散→統合）: mean={pmean:.1%}（n={len(preservation_rates)}）"
+                f"具体性保存率（発散→昇華）: mean={pmean:.1%}（n={len(preservation_rates)}）"
             )
         for line in summary_lines:
             print(line)
@@ -619,35 +621,35 @@ def _save_baseline_score_record(path: Path, label: str, overall: float, evaluato
     print(f"→ 保存: {path}")
 
 
-# ---- 反復改善（improve: 統合版を改修草案で磨くループ） ----
+# ---- 反復改善（improve: 昇華版を改修草案で磨くループ） ----
 
 def _revision_task(task: str, elevated_prev: str) -> str:
-    """前回の統合版を改修する草案のタスクを組み立てる。
+    """前回の昇華版を改修する草案のタスクを組み立てる。
 
-    「統合版 → 改修の草案(複数) → 統合」ループの「改修草案」段階。
-    各エージェントは前回の統合版を土台に、自分の観点から改修草案を書く。
-    統合版の良い部分（特に他観点にはない独自の核）は残し、弱点を補強し、
-    前回より高い版を目指す。草案は統合段階で他の改修草案と衝突させる前提なので独立に書く。
+    「昇華版 → 改修の草案(複数) → 昇華」ループの「改修草案」段階。
+    各エージェントは前回の昇華版を土台に、自分の観点から可能な限り逸脱して改修草案を書く。
+    昇華版の良い部分（特に他観点にはない独自の核）は残し、弱点を補強し、
+    前回より高い版を目指す。草案は昇華段階で他の改修草案と衝突させる前提なので独立に書く。
     """
     return (
         f"{task}\n\n"
-        f"【改修対象: 前回の統合版】\n{elevated_prev}\n\n"
-        "あなたはこの統合版を土台に、自分の観点から改修した草案を書く。\n"
+        f"【改修対象: 前回の昇華版】\n{elevated_prev}\n\n"
+        "あなたはこの昇華版を土台に、自分の観点から可能な限り逸脱して改修した草案を書く。\n"
         "既にある良い部分（特に、他の観点にはない独自の核）は残し、\n"
         "弱点や欠けている視点を補強し、前回より高い版を目指すこと。\n"
-        "草案は統合段階で他の改修草案と衝突させる前提なので、独立して書くこと。"
+        "草案は昇華段階で他の改修草案と衝突させる前提なので、独立して書くこと。"
     )
 
 
 def cmd_improve(args: argparse.Namespace) -> None:
-    """統合版を反復改善する: 統合版 → 改修の草案(複数) → 統合 のループ。
+    """昇華版を反復改善する: 昇華版 → 改修の草案(複数) → 昇華 のループ。
 
-    知恵の評議会の preserve「発散が持つ感情・意味の真実が統合を生き延びる」への対応。
-    初回はオリジナルタスクから発散 → 統合で統合版を作り、2回目以降は
-    「前回の統合版を改修する草案」を各エージェントが書き、それを統合して次の統合版にする。
-    統合版の成果がループを回すごとに相続・改善されていく。
+    知恵の評議会の preserve「発散が持つ感情・意味の真実が昇華を生き延びる」への対応。
+    初回はオリジナルタスクから発散 → 昇華で昇華版を作り、2回目以降は
+    「前回の昇華版を改修する草案」を各エージェントが書き、それを昇華して次の昇華版にする。
+    昇華版の成果がループを回すごとに相続・改善されていく。
 
-    --evaluate を付けると各ラウンドの統合版を採点し、改善がしきい値（--min-improve）未満に
+    --evaluate を付けると各ラウンドの昇華版を採点し、改善がしきい値（--min-improve）未満に
     なったら早期停止する（過修正で元の良さを失わせない）。
     """
     task = args.task
@@ -668,10 +670,10 @@ def cmd_improve(args: argparse.Namespace) -> None:
             round_args.out = rd
 
         if elevated_prev is None:
-            # 初回: オリジナルタスクから発散 → 統合
+            # 初回: オリジナルタスクから発散 → 昇華
             draft_task = task
         else:
-            # 2回目以降: 統合版 → 改修の草案(複数)。前回の統合版を土台に改修草案を書かせる
+            # 2回目以降: 昇華版 → 改修の草案(複数)。前回の昇華版を土台に改修草案を書かせる
             draft_task = _revision_task(task, elevated_prev)
 
         drafts = engine.diverge(
@@ -684,14 +686,14 @@ def cmd_improve(args: argparse.Namespace) -> None:
         if reconciliation:
             _save(round_args, "reconciliation", reconciliation)
 
-        print(f"[round {r}/{rounds}] 統合版 {len(elevated)} 字")
+        print(f"[round {r}/{rounds}] 昇華版 {len(elevated)} 字")
         _save(round_args, "elevated", elevated)
 
         entry = {"round": r, "length": len(elevated)}
         if args.evaluate:
             evaluator = _make_evaluator(args)
             result = _evaluate_and_report(
-                f"round {r} 統合版", elevated, task, evaluator,
+                f"round {r} 昇華版", elevated, task, evaluator,
                 save_to=round_args.out / "evaluation.md" if round_args.out else None,
             )
             entry["overall"] = result.overall
@@ -711,7 +713,7 @@ def cmd_improve(args: argparse.Namespace) -> None:
 
 
 def _save_progress(out: Path | None, task: str, progress: list[dict], *, evaluate: bool) -> None:
-    """各ラウンドの統合版の長さ・評価（progress.md）を保存する。"""
+    """各ラウンドの昇華版の長さ・評価（progress.md）を保存する。"""
     if out is None:
         return
     out.mkdir(parents=True, exist_ok=True)
@@ -722,21 +724,21 @@ def _save_progress(out: Path | None, task: str, progress: list[dict], *, evaluat
         "",
     ]
     if evaluate:
-        lines.append("| round | 統合版の長さ | overall | 前回からの改善 |")
+        lines.append("| round | 昇華版の長さ | overall | 前回からの改善 |")
         lines.append("|---|---|---|---|")
         for i, e in enumerate(progress):
             gain = "" if i == 0 else f"{e['overall'] - progress[i - 1]['overall']:+.3f}"
             lines.append(f"| {e['round']} | {e['length']} | {e['overall']:.3f} | {gain} |")
     else:
-        lines.append("| round | 統合版の長さ |")
+        lines.append("| round | 昇華版の長さ |")
         lines.append("|---|---|")
         for e in progress:
             lines.append(f"| {e['round']} | {e['length']} |")
     lines += [
         "",
         "各ラウンドの成果物は `round_NN/` に保存（draft_* / reconciliation / elevated）。",
-        "round 2 以降は「前回の統合版 → 改修の草案 → 統合」のループで、",
-        "改修草案を統合して次の統合版を作る（統合版の成果が相続される）。",
+        "round 2 以降は「前回の昇華版 → 改修の草案 → 昇華」のループで、",
+        "改修草案を昇華して次の昇華版を作る（昇華版の成果が相続される）。",
     ]
     path = out / "progress.md"
     path.write_text("\n".join(lines) + "\n")
@@ -768,12 +770,12 @@ def _save_measurement(
     if preservation_rates:
         pmean = sum(preservation_rates) / len(preservation_rates)
         text += (
-            f"- 具体性保存率（発散→統合）: mean={pmean:.1%}"
+            f"- 具体性保存率（発散→昇華）: mean={pmean:.1%}"
             f"（n={len(preservation_rates)}）\n"
         )
     text += "- 各 run の成果物・評価記録は `run_NN/` に保存。\n"
     text += (
-        "\n> 知恵の評議会の指摘（discovery_target）: 統合優位性は n≥10 の実測で"
+        "\n> 知恵の評議会の指摘（discovery_target）: 昇華優位性は n≥10 の実測で"
         "立証せよ。勝率が 50% を下回るタスクの開示こそが誠実な主張になる。\n"
     )
     path = out / "measurement.md"
