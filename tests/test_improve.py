@@ -140,6 +140,45 @@ def test_improve_progress_marks_loop(tmp_path) -> None:
     assert "相続" in text
 
 
+# ---- 高品位停止（--evaluate / --quality-ceiling） ----
+#
+# 高品位な成果物ほど改修で壊れやすい（実測: story-plot 0.860→0.520）。既に high な
+# overall の昇華版は、次の改修ラウンドを生成せず停止する（絶対品質での早期停止）。
+
+def test_improve_default_ceiling_not_hit_by_mock(tmp_path) -> None:
+    """既定しきい値（0.85）では mock（最高 overall 0.720）は高品位停止しない。
+
+    高品位停止は既定で有効だが、mock は 0.85 に届かないため、従来どおり
+    頭打ち（gain < min-improve）で停止する。既定値の確認を兼ねる。
+    """
+    code, out = _run_improve(
+        ["improve", "タスク", "--mock", "--rounds", "3", "--evaluate", "--out", str(tmp_path)]
+    )
+    assert code == 0
+    assert "高品位" not in out
+    assert (tmp_path / "round_03").exists(), "既定しきい値なら mock は高品位停止しない"
+
+
+def test_improve_quality_ceiling_stops_before_revision_round(tmp_path) -> None:
+    """既に高品位（overall ≥ しきい値）なら改修ラウンドを生成せず停止する。
+
+    しきい値を 0.70 に下げると、round 2 の昇華版（mock 0.720）が高品位判定に達し、
+    次の改修ラウンド（round 3）を作らない。過修正（0.860→0.520 型の後退）の防止。
+    """
+    code, out = _run_improve(
+        ["improve", "タスク", "--mock", "--rounds", "5",
+         "--evaluate", "--quality-ceiling", "0.70", "--out", str(tmp_path)]
+    )
+    assert code == 0
+    assert "高品位" in out
+    assert (tmp_path / "round_02").exists(), "round 2 の成果物は保存される"
+    assert not (tmp_path / "round_03").exists(), "高品位なら改修ラウンドを作らない"
+    text = (tmp_path / "progress.md").read_text()
+    assert "停止理由" in text
+    assert "高品位" in text
+    assert "高品位しきい値 0.7" in text  # しきい値が記録される
+
+
 # ---- 頭打ち早期停止（--evaluate / --min-improve） ----
 
 def test_improve_visible_improvement_then_plateau(tmp_path) -> None:

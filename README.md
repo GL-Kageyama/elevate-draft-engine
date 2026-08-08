@@ -150,7 +150,7 @@ python main.py improve "タスク" --rounds 3 --evaluate             # + 各ラ�
 `outputs/{タスク名}/` に自動保存。diverge / elevate / compare / improve すべて全成果物を対象）/
 `--runs N`（compare を N 回反復）/ `--baseline single|best-of-n`（比較対象）/
 `--no-strong-claim`（断言枠除去）/ `--logic-check`（論理一貫性の復元工程。既定は無効）/
-`--rounds N` / `--min-improve`（improve の反復回数・頭打ちしきい値）
+`--rounds N` / `--min-improve` / `--quality-ceiling`（improve の反復回数・頭打ちしきい値・高品位停止しきい値。高品位は既定 0.85 で有効）
 
 ### 昇華優位性の計測（compare）
 
@@ -259,10 +259,15 @@ python main.py improve "タスク" --rounds 5 --evaluate     # 各ラウンド�
 | `--rounds N` | 昇華を繰り返す回数（既定 3） |
 | `--evaluate` | 各ラウンドの昇華版を5軸評価し、overall を progress.md に記録 |
 | `--min-improve` | 頭打ちしきい値。直前ラウンドからの overall 改善がこれ未満なら早期停止（既定 0.01）。`--evaluate` 時のみ |
+| `--quality-ceiling` | 高品位停止しきい値。overall がこれ以上なら改修ラウンドを生成せず停止（既定 0.85）。`--evaluate` 時のみ・既定で有効 |
 
-`--evaluate` の頭打ち停止は、**過修正で元の良さを失わせない**ための安全弁である
-（改善が頭打ちになったらループを止める。ゼロからやり直す `compare` とは対照的に、
-`improve` は相続によって改善していく）。
+`--evaluate` の早期停止は、**過修正で元の良さを失わせない**ための安全弁である。
+(1) **高品位停止**: 昇華版の overall が `--quality-ceiling`（既定 0.85）以上なら、
+次の改修ラウンドを生成せず停止する。既に高品位な成果物ほど改修で壊れやすい
+（実測 2026-08-09: story-plot は round1 0.860 → round2 0.520 に後退。しきい値が
+これを防ぐ）。(2) **頭打ち停止**: 直前ラウンドからの改善が `--min-improve`（既定 0.01）
+未満なら停止。ゼロからやり直す `compare` とは対照的に、`improve` は相続によって
+改善していく。停止理由は `progress.md` の「**停止理由**」に記録される。
 
 動作確認（`--mock --evaluate`）では、ルーブリック再調整後の新基準で向上がそのまま見える
 （ポリシー密着5軸の下では overall = 均等重み × 各軸。素の生成相当は 0.600 から始まる）:

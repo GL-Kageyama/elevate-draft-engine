@@ -1,7 +1,7 @@
 ---
 name: elevate-draft-engine
 description: Facade to invoke the elevate-draft-engine pipeline (diverge → aufheben → finalize). Given a task, runs the Python engine via main.py, saves input + each draft + reconciliation + elevated artifact into examples/<task>/ (or a custom dir), and reports the result. Supports elevate / improve（昇華版→改修草案→昇華の反復）/ compare（素の生成 vs 昇華の実測）. All orchestration, completeness guards, and temperature control live in the engine — this skill only calls it. Use to elevate an idea through dialectical sublation (Aufheben) of maximally-divergent creator drafts, to re-sublimate existing draft files, to iteratively refine an elevated artifact, or to measure whether aufheben beats single-shot generation.
-argument-hint: 'JSON: {"command": "elevate|improve|compare|synthesize", "task": "<タスク>", "agents": ["strategist","humanist",...], "method": "two-stage|single-pass", "engine": "claude-code|sdk|mock", "rounds": 3, "evaluate": true, "min_improve": 0.01, "runs": 1, "baseline": "single|best-of-n", "save_dir": "<任意指定; 省略で examples/<slug> に自動保存>"}'
+argument-hint: 'JSON: {"command": "elevate|improve|compare|synthesize", "task": "<タスク>", "agents": ["strategist","humanist",...], "method": "two-stage|single-pass", "engine": "claude-code|sdk|mock", "rounds": 3, "evaluate": true, "min_improve": 0.01, "quality_ceiling": 0.85, "runs": 1, "baseline": "single|best-of-n", "save_dir": "<任意指定; 省略で examples/<slug> に自動保存>"}'
 ---
 
 # Elevate Draft Engine — Facade
@@ -48,7 +48,8 @@ Python エンジン側にある。**クリエイターエージェントをサ�
 | `engine` | `claude-code` | `claude-code`（`claude -p` 独立起動・安定）/ `sdk` / `mock` |
 | `rounds` | `3` | `improve` のみ: 昇華を繰り返す回数。round 2 以降は前回の昇華版を改修した草案を昇華 |
 | `evaluate` | `false` | `improve`: 各ラウンドの昇華版を5軸評価し、改善が頭打ちなら早期停止 / `compare`: スコア比較を有効化 |
-| `min_improve` | `0.01` | `improve --evaluate` の早期停止しきい値。直前ラウンドからの overall 改善がこれ未満なら停止（過修正を避ける） |
+| `min_improve` | `0.01` | `improve --evaluate` の早期停止しきい値。直前ラウンドからの overall 改善がこれ未満なら停止（頭打ち。過修正を避ける） |
+| `quality_ceiling` | `0.85` | `improve --evaluate` の高品位停止しきい値。昇華版の overall がこれ以上なら改修ラウンドを生成せず停止（既に高品位な成果物は改修で壊れやすいため。実測: story-plot 0.860→0.520） |
 | `runs` | `1` | `compare` のみ: 比較を N 回反復し統計集計（平均・勝率・標準偏差・95%CI）を出力 |
 | `baseline` | `single` | `compare` のみ: `single`（素の単発生成）/ `best-of-n`（昇華しない最良草案選択＝帰無仮説） |
 | `save_dir` | 自動 | 保存先。省略時 `examples/<slug>/`（下記） |
@@ -105,7 +106,7 @@ cd "$ENGINE_REPO"
 .venv/bin/python main.py improve "$TASK" --rounds 3 --evaluate --out "$SAVE_DIR/improve"
 ```
 
-  - `--evaluate` で各ラウンドの昇華版を5軸評価し、改善が `--min-improve`（既定 0.01）未満なら頭打ちで早期停止（過修正で元の良さを失わない）。各 round は `round_NN/` に分離保存、進捗は `progress.md` に記録。
+  - `--evaluate` で各ラウンドの昇華版を5軸評価し、(1) overall が既に `--quality-ceiling`（既定 0.85）以上なら**高品位停止**（次の改修ラウンドを作らず終了）、(2) 改善が `--min-improve`（既定 0.01）未満なら頭打ちで停止。どちらも過修正で元の良さを失わせないための機構（高品位な成果物ほど改修で壊れやすい）。停止理由は `progress.md` の「**停止理由**」に記録される。各 round は `round_NN/` に分離保存。
 
 - 「昇華が単発生成を上回るか」の実測は `compare` を使う（generate vs elevate を**同一評価器**で採点。ブラインドのため条件ラベルは評価器に渡らない）:
 
@@ -186,6 +187,7 @@ Rules:
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 2.0.1 | 2026-08-09 | `improve` に高品位停止を追加（`--quality-ceiling` 既定 0.85）。overall がしきい値以上なら改修ラウンドを生成せず停止（実測: story-plot 0.860→0.520 の過修正を防ぐ）。停止理由は progress.md に記録 |
 | 2.0.0 | 2026-08-08 | 中核機構を「論理的な統合（synthesis）」から「弁証法的昇華（Aufheben）」へ衣替え。DIVERGE は温度0.9で極限まで逸脱し、昇華推理が否定・保存・高次化の三契機で矛盾を包括する枠組みを創出する。DIVERGE → AUFHEBEN → FINALIZE の3段構え（用語変更ではなく機構変更） |
 | 1.3.0 | 2026-08-08 | 起動時にユーザーへリポジトリ全体の概要を改行・段落で簡潔に伝える手順を Procedure 冒頭に追加 |
 | 1.2.0 | 2026-08-08 | 評価軸をポリシー密着5軸（多様性/統合性/超越性/誠実性/実用性・均等0.20）に再設計（README「評価の5軸」参照）。Risk 軸廃止 |

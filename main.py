@@ -84,6 +84,8 @@ def _build_parser() -> argparse.ArgumentParser:
     imp.add_argument("--evaluate", action="store_true", help="各ラウンドの昇華版を5軸評価し、改善が頭打ちなら早期停止")
     imp.add_argument("--min-improve", type=float, default=0.01,
                     help="--evaluate 時の早期停止しきい値。直前ラウンドからの overall 改善がこれ未満なら停止（既定 0.01）")
+    imp.add_argument("--quality-ceiling", type=float, default=0.85,
+                    help="--evaluate 時の高品位停止しきい値。昇華版の overall がこれ以上なら改修を停止（既定 0.85。既に高品位の成果物は改修で壊れやすいため過修正を避ける）")
     imp.set_defaults(func=cmd_improve)
 
     cal = sub.add_parser(
@@ -728,8 +730,10 @@ def cmd_improve(args: argparse.Namespace) -> None:
     「前回の昇華版を改修する草案」を各エージェントが書き、それを昇華して次の昇華版にする。
     昇華版の成果がループを回すごとに相続・改善されていく。
 
-    --evaluate を付けると各ラウンドの昇華版を採点し、改善がしきい値（--min-improve）未満に
-    なったら早期停止する（過修正で元の良さを失わせない）。
+    --evaluate を付けると各ラウンドの昇華版を採点し、
+    1) 既に高品位（overall >= --quality-ceiling、既定 0.85）なら改修連鎖を停止し、
+    2) 改善がしきい値（--min-improve）未満になったら頭打ちで早期停止する。
+    どちらも過修正で元の良さを失わせないための機構（高品位な成果物ほど改修で壊れやすい）。
     """
     task = args.task
     _resolve_out(args, task)
@@ -739,6 +743,7 @@ def cmd_improve(args: argparse.Namespace) -> None:
     rounds = max(1, args.rounds)
     elevated_prev: str | None = None
     progress: list[dict] = []
+    stop_note: str | None = None
 
     for r in range(1, rounds + 1):
         round_args = args
@@ -779,23 +784,36 @@ def cmd_improve(args: argparse.Namespace) -> None:
                 save_to=round_args.out / "evaluations/evaluation.md" if round_args.out else None,
             )
             entry["overall"] = result.overall
+            # 既に高品位なら、次の改修ラウンドを生成せず停止する。
+            # 高品位な成果物ほど改修で壊れやすい（実測: story-plot 0.860→0.520）。
+            if entry["overall"] >= args.quality_ceiling:
+                stop_note = (
+                    f"round {r} の overall {entry['overall']:.3f} ≥ 高品位しきい値 "
+                    f"{args.quality_ceiling} → 既に高品位のため改修連鎖を停止（過修正を避ける）"
+                )
+                print(f"→ {stop_note}")
+                break
         progress.append(entry)
 
         if args.evaluate and len(progress) >= 2:
             gain = entry["overall"] - progress[-2]["overall"]
             if gain < args.min_improve:
-                print(
-                    f"→ round {r}: 改善 {gain:+.3f} < しきい値 {args.min_improve}"
+                stop_note = (
+                    f"round {r} の改善 {gain:+.3f} < しきい値 {args.min_improve}"
                     " → 頭打ちと判断し停止（過修正を避ける）"
                 )
+                print(f"→ {stop_note}")
                 break
         elevated_prev = elevated
 
-    _save_progress(args.out, task, progress, evaluate=args.evaluate)
+    _save_progress(args.out, task, progress, evaluate=args.evaluate, note=stop_note)
 
 
-def _save_progress(out: Path | None, task: str, progress: list[dict], *, evaluate: bool) -> None:
-    """各ラウンドの昇華版の長さ・評価（progress.md）を保存する。"""
+def _save_progress(out: Path | None, task: str, progress: list[dict], *, evaluate: bool, note: str | None = None) -> None:
+    """各ラウンドの昇華版の長さ・評価（progress.md）を保存する。
+
+    note が指定されると、早期停止（高品位 or 頭打ち）の理由を末尾に記録する。
+    """
     if out is None:
         return
     out.mkdir(parents=True, exist_ok=True)
@@ -822,6 +840,8 @@ def _save_progress(out: Path | None, task: str, progress: list[dict], *, evaluat
         "round 2 以降は「前回の昇華版 → 改修の草案 → 昇華」のループで、",
         "改修草案を昇華して次の昇華版を作る（昇華版の成果が相続される）。",
     ]
+    if note:
+        lines += ["", f"**停止理由**: {note}"]
     path = out / "progress.md"
     path.write_text("\n".join(lines) + "\n")
     print(f"→ 保存: {path}")
