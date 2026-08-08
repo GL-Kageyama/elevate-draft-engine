@@ -1,9 +1,8 @@
 """DraftEngine のテスト（モッククライアント使用）。
 
-insight-synapse の M2v2 系テスト（conditions.py 内のプロンプト構築・完全性ガード）を
-DraftEngine の公開API（generate / diverge / synthesize / elevate / エージェント管理）に
-書き換えたもの。プロンプトの実測観察に依存しすぎないよう、呼出数・温度・
-引数構成・中間思考の非混入を検証する。
+DraftEngine の公開API（generate / diverge / synthesize / elevate / エージェント管理）を
+検証する。プロンプトの実測観察に依存しすぎないよう、呼出数・温度・引数構成・
+中間思考の非混入を検証する。
 
 検証対象: elevate/engine.py（DIVERGE → SYNTHESIZE の2段構え）
 エージェントは agents/*.md から読込まれる（正本はファイル）。
@@ -87,7 +86,7 @@ def _draft_pair() -> list[Draft]:
     ]
 
 
-# ---- 素の生成（B0相当） ----
+# ---- 素の生成 ----
 
 def test_generate_uses_analysis_system_at_default_temperature() -> None:
     """generate() は ANALYSIS_SYSTEM + 既定温度（None → 0.0）で1回だけ呼ぶ。"""
@@ -193,8 +192,8 @@ def test_diverge_unknown_agent_raises() -> None:
 
 # ---- SYNTHESIZE（核心） ----
 
-def test_synthesize_m2v2_reconcile_then_finalize() -> None:
-    """m2v2: 推理（RECONCILIATION）→ 最終化（FINALIZE）の2回呼び。"""
+def test_synthesize_two_stage_reconcile_then_finalize() -> None:
+    """two-stage: 推理（RECONCILIATION）→ 最終化（FINALIZE）の2回呼び。"""
     client = MockGenerator()
     engine = DraftEngine(client)
     drafts = _draft_pair()
@@ -205,7 +204,7 @@ def test_synthesize_m2v2_reconcile_then_finalize() -> None:
     assert out
 
 
-def test_synthesize_m2v2_reconcile_uses_draft_temperature_finalize_zero() -> None:
+def test_synthesize_two_stage_reconcile_uses_draft_temperature_finalize_zero() -> None:
     """推理は温度 0.7（深度）、最終化は 0.0（一貫性）。"""
     client = MockGenerator()
     engine = DraftEngine(client, draft_temperature=0.7)
@@ -235,11 +234,11 @@ def test_synthesize_finalize_excludes_draft_content() -> None:
         assert d.content not in finalize_user
 
 
-def test_synthesize_m2_single_call() -> None:
-    """m2: 単発統合（1回呼び）。"""
+def test_synthesize_single_pass_single_call() -> None:
+    """single-pass: 単発統合（1回呼び）。"""
     client = MockGenerator()
     engine = DraftEngine(client)
-    out = engine.synthesize(_draft_pair(), method="m2")
+    out = engine.synthesize(_draft_pair(), method="single-pass")
     assert len(client.calls) == 1
     assert ANALYSIS_SYSTEM in client.calls[0]["system"] and SYNTHESIS_SYSTEM in client.calls[0]["system"]
     assert out
@@ -330,10 +329,10 @@ def test_finalize_regenerates_when_incomplete() -> None:
 
 
 def test_synthesis_regenerates_when_incomplete() -> None:
-    """単発統合（m2）が打ち切られたら再生成する。"""
+    """単発統合（single-pass）が打ち切られたら再生成する。"""
     client = FlakyGenerator(n_broken=1)
     engine = DraftEngine(client)
-    out = engine.synthesize(_draft_pair(), method="m2")
+    out = engine.synthesize(_draft_pair(), method="single-pass")
     assert client.calls == 2
     assert out
 

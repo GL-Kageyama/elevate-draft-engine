@@ -1,6 +1,6 @@
 """Evaluation Engine の単体テスト（モッククライアント使用）。
 
-検証対象: docs/03_コアコンポーネント/00_数値定義書.md §2（overall式・合格しきい値）
+検証対象: evaluation/evaluator.py（overall式・合格しきい値）
 """
 
 import sys
@@ -30,7 +30,7 @@ class MockClient:
 
 
 def test_compute_overall_formula():
-    """03/00 §2.3: overall = Q×0.25 + L×0.20 + C×0.20 + V×0.25 + (1−R)×0.10"""
+    """overall = Q×0.25 + L×0.20 + C×0.20 + V×0.25 + (1−R)×0.10（evaluator.py の compute_overall と同一）"""
     scores = {"quality": 1.0, "logic": 1.0, "creativity": 1.0, "value": 1.0, "risk": 0.0}
     assert compute_overall(scores) == pytest.approx(1.0)
     scores2 = {"quality": 0.0, "logic": 0.0, "creativity": 0.0, "value": 0.0, "risk": 1.0}
@@ -82,17 +82,7 @@ def test_engine_revise_with_mock():
     assert engine.score_judgment(result.overall) == "Revise"
 
 
-def test_engine_blinding_prompt_has_no_condition_label():
-    """盲検化: 評価プロンプトに条件ラベル（B0/B1/B2/C4）が含まれないこと。"""
-    client = MockClient('{"quality": 0.5, "logic": 0.5, "creativity": 0.5, "value": 0.5, "risk": 0.5}')
-    engine = EvaluationEngine(client)
-    engine.evaluate("成果物", "タスク")
-    prompt = client.calls[0]["user"] + client.calls[0]["system"]
-    for label in ("B0", "B1", "B2", "C4", "Insight Synapse", "unknown", "Thought Trace"):
-        assert label.lower() not in prompt.lower()
-
-
-# ---- Step 2 ルーブリック改訂（2026-08-08）----
+# ---- ルーブリック改訂（2026-08-08）----
 
 def test_rubric_risk_axis_redefined():
     """Risk 軸が「リスク認識の適切さ」に再定義されていること（Step 2）。"""

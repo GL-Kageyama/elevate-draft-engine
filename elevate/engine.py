@@ -26,8 +26,8 @@
 核心価値は synthesize（矛盾解決推理 → 最終化）にある。各エージェントは「より良いものを
 作る」クリエイター目線で統一され、エージェント同士の生産的衝突が統合時の掛け算の源泉になる。
 
-wisdom-council-layer の agents/ 方式（1エージェント=1ファイル、frontmatter + ペルソナ本文）
-を踏襲し、デフォルト8エージェントは agents/{name}.md に配置する。正本はファイル。
+エージェントは**1エージェント=1ファイル**方式（frontmatter + ペルソナ本文）で
+agents/{name}.md に配置する。正本はファイル。
 ユーザーは add_agent() / remove_agent() で拡張でき、synthesize() は人間が書いた草案など
 外部草案も受け付ける。
 """
@@ -39,7 +39,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-# ---- 素の生成（B0 相当） ----
+# ---- 素の生成（単発） ----
 ANALYSIS_SYSTEM = (
     "あなたはAIサービス企画の専門家です。与えられたテーマを"
     "Target（対象顧客）・Value（提供価値）・Risk（リスク）・Opportunity（機会）の"
@@ -47,8 +47,8 @@ ANALYSIS_SYSTEM = (
 )
 
 # ---- デフォルトエージェント（全クリエイター目線） ----
-# wisdom-council-layer の agents/ 方式を踏襲し、各エージェントは agents/{name}.md に
-# frontmatter（name, description）+ ペルソナ本文として配置する。正本はファイル。
+# 各エージェントは agents/{name}.md に frontmatter（name, description）+ ペルソナ本文として
+# 配置する。正本はファイル。
 # 温度は draft_temperature（既定 0.7）で多様性を確保。
 DEFAULT_AGENTS_DIR = Path(__file__).resolve().parent.parent / "agents"
 
@@ -84,7 +84,7 @@ def load_agents(agents_dir: str | Path | None = None) -> dict[str, str]:
     return result
 
 
-# ---- 単発統合（method="m2"） ----
+# ---- 単発統合（method="single-pass"） ----
 SYNTHESIS_SYSTEM = (
     "あなたは統合分析者です。同じテーマに対する複数の独立した草案を統合し、観点間の矛盾を"
     "解消した一段高い分析を提示してください。"
@@ -102,7 +102,7 @@ SYNTHESIS_INSTRUCTION = (
     "単なる「全観点の併記」や「平均化」は不合格。矛盾を解決する一段高い推論を要求する。"
 )
 
-# ---- 2段階統合（method="m2v2"） ----
+# ---- 2段階統合（method="two-stage"） ----
 # 単発統合は推理と表現を同時に要求し、推理の冗長さが明瞭さを損なう。推理（Reconcile）と
 # 表現（Finalize）を分離し、深度と明瞭さを同時に確保する。
 
@@ -128,7 +128,7 @@ RECONCILIATION_INSTRUCTION = (
     "この推理は後続工程の最終分析の材料であり、読者に直接提示する成果物ではない。論証を尽くしてよい。"
 )
 
-# 表現（Finalize）: 解決済みの推理だけを読み、B0級の明瞭な最終分析に仕上げる。
+# 表現（Finalize）: 解決済みの推理だけを読み、単発生成と同水準の明瞭な最終分析に仕上げる。
 # 推理の中間思考（草案同士の比較・経緯説明）を最終成果物に残さない。
 FINALIZE_SYSTEM = (
     "あなたはAIサービス企画の専門家です。与えられた「矛盾解決推理」を、読み手に直接届く最終分析として"
@@ -148,7 +148,7 @@ FINALIZE_INSTRUCTION = (
 # ---- 草案生成の温度（多様性の確保）。統合・最終化・評価は 0.0（一貫性のため） ----
 DRAFT_TEMPERATURE = 0.7
 
-# ---- 打ち切りガード（wisdom-council 方式: 崩れたら再生成） ----
+# ---- 打ち切りガード（崩れたら再生成） ----
 _SYNTHESIS_TERMINAL_MARKERS = ("。", "！", "？", "…", "」", "）", "}", ")", '"', ".", "!", "?")
 
 # 統合生成の再生成上限（打ち切りが直らない場合の明示的失敗の境界）
@@ -213,7 +213,7 @@ def _generate_with_completeness_guard(
 ) -> str:
     """指定 system で生成し、完全性ガード（broken output → regenerate）を適用する。
 
-    wisdom-council 方式: 構造が既知の呼び出し側で決定的に検証し、崩れた出力は再生成。
+    構造が既知の呼び出し側で決定的に検証し、崩れた出力は再生成する。
     上限回数で直らない場合は明示的失敗（不完全出力を評価に渡さない）。
     temperature を渡すことで、推理は温度0.7、最終化は0.0を実現する。
     is_complete を渡すと判定を差し替えられる（最終化=文終端 / 推理=長さ下限）。
@@ -230,7 +230,7 @@ def _generate_with_completeness_guard(
 
 
 def _generate_synthesis(generator: Generator, synthesis_user: str) -> str:
-    """単発統合（method="m2"）を生成する。打ち切りは再生成し、直らない場合は明示的に失敗させる。"""
+    """単発統合（method="single-pass"）を生成する。打ち切りは再生成し、直らない場合は明示的に失敗させる。"""
     return _generate_with_completeness_guard(
         generator, ANALYSIS_SYSTEM + SYNTHESIS_SYSTEM, synthesis_user, label="統合生成"
     )
@@ -251,7 +251,7 @@ def _generate_reconciliation(generator: Generator, reconcile_user: str, *, tempe
 
 
 def _generate_finalize(generator: Generator, finalize_user: str) -> str:
-    """最終分析を生成する。打ち切りは再生成。温度は 0.0（一貫性。B0 と同じ明瞭な表形式）。"""
+    """最終分析を生成する。打ち切りは再生成。温度は 0.0（一貫性。素の生成と同じ明瞭な表形式）。"""
     return _generate_with_completeness_guard(
         generator, ANALYSIS_SYSTEM + FINALIZE_SYSTEM, finalize_user, label="最終分析"
     )
@@ -284,7 +284,7 @@ def _build_reconciliation_prompt(task: str, drafts: list[Draft]) -> str:
 
 
 def _build_synthesis_prompt(task: str, drafts: list[Draft]) -> str:
-    """単発統合（method="m2"）の user プロンプトを組み立てる。"""
+    """単発統合（method="single-pass"）の user プロンプトを組み立てる。"""
     parts = [f"【タスク】\n{task}"] if task else []
     parts += _drafts_block(drafts)
     parts.append(f"【統合指示】\n{SYNTHESIS_INSTRUCTION}")
@@ -310,7 +310,7 @@ def _build_finalize_prompt(task: str, reconciliation: str) -> str:
 class DraftEngine:
     """複数のエージェント（観点）から草案を生成し、統合して一段高い成果物を生むエンジン。
 
-    - `generate(task)`  … 素のAI（B0相当）。1 call
+    - `generate(task)`  … 素のAI（単発生成）。1 call
     - `diverge(task)`   … 登録エージェントで独立草案を生成。8 calls（既定）
     - `synthesize(drafts)` … 外部草案も含む複数草案を統合（核心）
     - `elevate(task)`   … diverge → synthesize の一気ラッパー
@@ -336,7 +336,7 @@ class DraftEngine:
     # ---- 素の生成 ----
 
     def generate(self, task: str) -> str:
-        """素のAI（B0相当）: 温度 0.0 で分析成果物を生成する。1 call。"""
+        """素のAI（単発生成）: 温度 0.0 で分析成果物を生成する。1 call。"""
         return self.client.generate(system=ANALYSIS_SYSTEM, user=task)
 
     # ---- エージェント管理 ----
@@ -376,32 +376,32 @@ class DraftEngine:
     # ---- SYNTHESIZE（核心） ----
 
     def synthesize_with_reconciliation(
-        self, drafts: list[Draft], method: str = "m2v2", task: str = ""
+        self, drafts: list[Draft], method: str = "two-stage", task: str = ""
     ) -> tuple[str, str]:
         """統合し、推理（統合の下地）と成果物を返す。
 
-        戻り値: (reconciliation, artifact)。method="m2" は推理が無いため ("", artifact)。
+        戻り値: (reconciliation, artifact)。method="single-pass" は推理が無いため ("", artifact)。
         推理を保存したい呼び出し側（CLI の --out 等）はこちらを使う。
         """
         if not drafts:
             raise ValueError("統合対象の草案がありません")
-        if method == "m2v2":
+        if method == "two-stage":
             reconcile_user = _build_reconciliation_prompt(task, drafts)
             reconciliation = _generate_reconciliation(
                 self.client, reconcile_user, temperature=self.draft_temperature
             )
             finalize_user = _build_finalize_prompt(task, reconciliation)
             return reconciliation, _generate_finalize(self.client, finalize_user)
-        if method == "m2":
+        if method == "single-pass":
             synthesis_user = _build_synthesis_prompt(task, drafts)
             return "", _generate_synthesis(self.client, synthesis_user)
-        raise ValueError(f"未知の method: {method!r}（'m2v2' または 'm2'）")
+        raise ValueError(f"未知の method: {method!r}（'two-stage' または 'single-pass'）")
 
-    def synthesize(self, drafts: list[Draft], method: str = "m2v2", task: str = "") -> str:
+    def synthesize(self, drafts: list[Draft], method: str = "two-stage", task: str = "") -> str:
         """複数の独立草案を統合して一段高い成果物を返す。
 
-        - method="m2v2": 矛盾解決推理 → 最終化（2段階統合。温度: 推理 0.7 / 最終化 0.0）
-        - method="m2":  単発統合（1コール。旧 M2 相当）
+        - method="two-stage": 矛盾解決推理 → 最終化（2段階統合。温度: 推理 0.7 / 最終化 0.0）
+        - method="single-pass":  単発統合（1コール）
 
         drafts は外部草案（人間の専門家が書いた分析、別モデルの出力等）でもよい。
         出所を問わず「複数の異なる視点」を突っ込めば一段高い統合を返す。
@@ -411,7 +411,7 @@ class DraftEngine:
 
     # ---- 便利ラッパー ----
 
-    def elevate(self, task: str, method: str = "m2v2", agents: list[str] | None = None) -> str:
+    def elevate(self, task: str, method: str = "two-stage", agents: list[str] | None = None) -> str:
         """diverge → synthesize を一気に行う。"""
         drafts = self.diverge(task, agents=agents)
         return self.synthesize(drafts, method=method, task=task)

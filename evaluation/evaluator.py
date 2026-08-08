@@ -1,10 +1,10 @@
 """Evaluation Engine — 評価5軸による採点。
 
-正版: docs/06_評価と学習/01_エバリュエーションエンジン詳細仕様書.md
-数値正版: docs/03_コアコンポーネント/00_数値定義書.md §2（重み・ルーブリック・overall式）
+数値定義（重み・ルーブリック・overall式）は本ファイル内の DEFAULT_WEIGHTS /
+RUBRIC / compute_overall() に集約する。
 
 評価者は**独立評価系統**（生成とは別モデル）を使う。盲検化のため評価プロンプトに
-条件ラベルは渡さない（ブラインド化は harness 側の責務）。
+条件ラベルは渡さない（ブラインド化は呼び出し側の責務）。
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-# 評価5軸の重み（03/00 §2.2）
+# 評価5軸の重み
 DEFAULT_WEIGHTS: dict[str, float] = {
     "quality": 0.25,
     "logic": 0.20,
@@ -23,13 +23,13 @@ DEFAULT_WEIGHTS: dict[str, float] = {
     "risk": 0.10,
 }
 
-# 評価スコア抽出の再生成リトライ最大回数（wisdom-council-layer 方式: 崩れたら再生成）
+# 評価スコア抽出の再生成リトライ最大回数（崩れたら再生成）
 MAX_EVALUATION_RETRIES = 3
 
-# 採点ルーブリック（03/00 §2.5 の行動的定義）を評価プロンプトに埋め込む
-# Step 2 改訂（2026-08-08）: Risk 軸を「リスク認識の適切さ」に再定義。
-# Step 1 で「正直なリスク開示ほど高リスク評価 → overall が下がる」構造的バイアスが
-# 確認されたため、軸の方向を修正（詳細は 03/00 §2.5 の追記を参照）。
+# 採点ルーブリック（行動的定義）を評価プロンプトに埋め込む
+# Risk 軸は「リスク認識の適切さ」として定義する。
+# 「正直なリスク開示ほど高リスク評価 → overall が下がる」構造的バイアスが
+# 確認されたため、軸の方向を修正した。
 RUBRIC = """各軸を0.0〜1.0で採点する。Risk は「リスクの認識と対処が適切か」を測る。
 
 Quality（完成度）: 0.8-1.0=明確・一貫・使用可能・不確実性を適切に区別 / 0.5-0.7=構造はあるが欠落 / 0.0-0.4=不明瞭・不確実なことを断定
@@ -58,7 +58,7 @@ class EvaluationResult:
 
 
 def compute_overall(scores: dict[str, float], weights: dict[str, float] | None = None) -> float:
-    """overall スコア算出（03/00 §2.3）。
+    """overall スコア算出。
 
     overall = quality×0.25 + logic×0.20 + creativity×0.20 + value×0.25 + (1−risk)×0.10
     """
@@ -122,7 +122,7 @@ class EvaluationEngine:
         """成果物を5軸で採点する。盲検化のため task_prompt に条件情報を含めないこと。
 
         スコアJSONの抽出に失敗した場合、形式エラーのフィードバックを付けて
-        再生成する（最大3回。wisdom-council-layer 方式: 崩れたら再生成）。
+        再生成する（最大3回。崩れたら再生成）。
         """
         system = (
             "あなたは成果物の評価者です。提示された成果物を、所定のルーブリックに従い"
@@ -165,7 +165,7 @@ class EvaluationEngine:
         )
 
     def score_judgment(self, overall: float) -> str:
-        """03/00 §2.4: Pass / Revise / Regenerate"""
+        """Pass / Revise / Regenerate の判定"""
         if overall >= self.pass_threshold:
             return "Pass"
         if overall >= 0.50:

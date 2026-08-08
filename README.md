@@ -20,7 +20,7 @@ AIが一発で出す「平均的な良い答え」を超えるために、**DIVE
              [矛盾解決推理 Reconcile]     ← エージェント同士の衝突を検出し、一段高い位置から解決
                       │                    （掛け算の発生点。読者向けではない思考の土台）
                       ↓
-             [最終化 Finalize]           ← 解決済み推理だけを読み、B0級の明瞭な成果物に仕上げる
+             [最終化 Finalize]           ← 解決済み推理だけを読み、単発生成を上回る明瞭な成果物に仕上げる
                       │
                       ↓
                 最終成果物
@@ -33,8 +33,8 @@ AIが一発で出す「平均的な良い答え」を超えるために、**DIVE
 
 ## エージェント（agents/）
 
-wisdom-council-layer の `agents/` 方式を踏襲し、**1エージェント=1ファイル**で `agents/{name}.md`
-に配置する。正本はファイル。エンジンは起動時に `agents/*.md` を読み込み、
+**1エージェント=1ファイル**方式で `agents/{name}.md` に配置する。正本はファイル。
+エンジンは起動時に `agents/*.md` を読み込み、
 frontmatter の `name` をエージェント名、本文（ペルソナ）をシステムプロンプトとして使う。
 
 ```markdown
@@ -64,27 +64,27 @@ You are the **Strategist**, a voice of value and markets.
 としても呼べるようになる。ただし**エンジンはサブエージェントを使わない**——
 `agents/*.md` をリポジトリ内から直接読む。オーケストレーションは常に Python エンジン側。
 
-| # | ファイル | 観点 | 着想元 |
-|---|---------|------|--------|
-| 1 | `designer` | 体験設計 | aesthetic-critic |
-| 2 | `differentiator` | 独自性 | originality + anti-generic-filter |
-| 3 | `futurist` | 将来性 | future-potential |
-| 4 | `humanist` | 共感 | emotional-impact |
-| 5 | `implementer` | 実現性 | quality-evaluator |
-| 6 | `storyteller` | 物語 | brand narrative + storytelling |
-| 7 | `strategist` | 価値 | business-value |
-| 8 | `visionary` | 世界観 | philosophical + meaning |
+| # | ファイル | 観点 |
+|---|---------|------|
+| 1 | `designer` | 体験設計 |
+| 2 | `differentiator` | 独自性 |
+| 3 | `futurist` | 将来性 |
+| 4 | `humanist` | 共感 |
+| 5 | `implementer` | 実現性 |
+| 6 | `storyteller` | 物語 |
+| 7 | `strategist` | 価値 |
+| 8 | `visionary` | 世界観 |
 
 ## クイックスタート
 
 ```bash
 python -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/python -m pytest tests/ -q     # 45件
+.venv/bin/python -m pytest tests/ -q     # 44件
 
 # API 不要のモックでパイプライン確認
 .venv/bin/python main.py compare "健康AIの企画" --mock --evaluate
 
-# 実API（claude -p 起動・wisdom-council 方式）でサンプル取得・保存
+# 実API（claude -p 独立起動）でサンプル取得・保存
 .venv/bin/python main.py elevate "健康AIの企画" \
   --engine claude-code --agents strategist humanist differentiator --out examples/health-ai
 ```
@@ -101,7 +101,7 @@ python -m venv .venv && .venv/bin/pip install -r requirements.txt
 ## CLI
 
 ```bash
-python main.py generate "タスク"                 # 素のAI（B0相当）, 1 call
+python main.py generate "タスク"                 # 素のAI（単発生成）, 1 call
 python main.py diverge "タスク"                  # 8エージェントで草案生成・一覧出力
 python main.py synthesize draft1.md draft2.md  # 外部草案を統合（核心）
 python main.py elevate "タスク"                  # diverge → synthesize 一気
@@ -110,7 +110,7 @@ python main.py compare "タスク" --evaluate       # + 5軸評価でスコア�
 ```
 
 共通オプション: `--mock`（API不要）/ `--engine sdk|claude-code`（既定 sdk）/
-`--method m2v2|m2`（既定 m2v2）/
+`--method two-stage|single-pass`（既定 two-stage）/
 `--agents strategist humanist`（エージェントを限定）/ `--out DIR`（成果物保存）
 
 ### 生成エンジン（--engine）
@@ -120,8 +120,7 @@ python main.py compare "タスク" --evaluate       # + 5軸評価でスコア�
 | `sdk`（既定） | `anthropic` SDK で1プロセス内から直呼び | 通常の Anthropic API |
 | `claude-code` | 呼び出しごとに `claude -p` を独立起動 | Claude Code 互換ゲートウェイ・不安定な SDK 経路の回避 |
 
-wisdom-council-layer の「エージェントは独立したサブエージェントとして起動する」方式に
-倣い、`claude-code` エンジンは草案・推理・最終化を**それぞれ独立プロセス**で生成する
+`claude-code` エンジンは草案・推理・最終化を**それぞれ独立プロセス**で生成する
 （中間コンテキストの混線なし・打ち切り時の再試行もプロセス単位）。温度はシステムプロンプト
 内の指示文で近似する（`温度≥0.5` → 発散重視 / `温度<0.5` → 一貫性重視）。
 
@@ -133,7 +132,7 @@ SDK 経由の空応答は `CLAUDE_MAX_RETRIES`（既定6）で再試行する。
 
 ## インストールとファサード skill
 
-`./install.sh` で Claude Code から呼べるようにする（wisdom-council と同型）。
+`./install.sh` で Claude Code から呼べるようにする（agents + skill を symlink 設置）。
 
 ```bash
 ./install.sh            # グローバル: ~/.claude/agents/ + ~/.claude/skills/
@@ -145,10 +144,9 @@ SDK 経由の空応答は `CLAUDE_MAX_RETRIES`（既定6）で再試行する。
 - **8クリエイターエージェント**（`strategist` 等）— Agent tool / @-mention で起動可能
 - **`elevate-draft-engine` skill（ファサード）** — `main.py` への薄い呼び出しインターフェース
 
-**ファサード skill の設計**: wisdom-council の skill は**オーケストレーター**（サブエージェントを
-招集・統合する）だが、elevate の skill は**ファサード**である。オーケストレーション
-（DIVERGE → 推理 → 最終化、完全性ガード、温度制御、`claude -p` 安定経路）はすべて
-Python エンジン側にあり、skill は `main.py` を起動して結果を報告するだけ。エンジンを
+**ファサード skill の設計**: elevate の skill は**オーケストレーターではなくファサード**である。
+オーケストレーション（DIVERGE → 推理 → 最終化、完全性ガード、温度制御、`claude -p` 安定経路）
+はすべて Python エンジン側にあり、skill は `main.py` を起動して結果を報告するだけ。エンジンを
 バイパスしてサブエージェントを直接統合するのはダウングレードなので行わない。
 
 ```bash
@@ -164,7 +162,7 @@ from adapters.claude_client import ClaudeClient
 
 engine = DraftEngine(ClaudeClient(), draft_temperature=0.7)
 
-# 素のAI（B0相当）— 1 call
+# 素のAI（単発生成）— 1 call
 raw = engine.generate("健康AIの企画")
 
 # エージェント管理
@@ -177,7 +175,7 @@ drafts = engine.diverge("健康AIの企画")
 
 # Step 2: SYNTHESIZE — 複数の異なる草案を統合（核心）
 elevated = engine.synthesize(drafts)     # 内部: reconcile → finalize
-elevated = engine.synthesize(drafts, method="m2")   # 単発統合（旧 M2）
+elevated = engine.synthesize(drafts, method="single-pass")   # 単発統合
 
 # 外部草案もそのまま統合できる
 external = [Draft(agent="human-expert", content="..."), Draft(agent="other-model", content="...")]
@@ -205,27 +203,20 @@ elevate-draft-engine/
 │   └── engine.py               # DraftEngine（agents/ 読込 + synthesize）
 ├── adapters/
 │   ├── claude_client.py        # Claude API クライアント（スロットル・空応答再試行込み）
-│   └── claude_code_client.py   # claude -p 独立起動（wisdom-council 方式・--engine claude-code）
+│   └── claude_code_client.py   # claude -p 独立起動（--engine claude-code）
 ├── evaluation/
 │   └── evaluator.py            # 5軸評価（自己完結。--evaluate 用）
 ├── skills/
 │   └── elevate-draft-engine/SKILL.md   # ファサード skill（main.py を起動。オーケストレーションは委譲）
-├── tests/                      # 45件（engine 28 / client 6 / evaluator 11）
-├── examples/                   # 実行サンプル集（wisdom-council 風。input + 各草案 + 成果物）
+├── tests/                      # 44件（engine 28 / client 6 / evaluator 10）
+├── examples/                   # 実行サンプル集（input + 各草案 + 成果物）
 ├── install.sh                  # agents + skill を Claude Code 検出先へ symlink 設置
 ├── main.py                     # 薄い CLI
 ├── requirements.txt
 └── README.md
 ```
 
-## 設計の経緯（なぜ統合が核心なのか）
-
-insight-synapse の ver1（単一軌道の逐次改良・加算型）は素の生成に -50pp で敗れた。
-ver2 の仮説は「**複数の全く異なった草案を強制統合**（乗算型）」が素の生成を上回るというもの。
-このリポジトリは ver2 の中核（M2v2: 2段階統合）を**単独のライブラリ**として切り出したもの。
-実験ハーネス・過去の対照条件（B1/B2/C4）・設計書群は持ち込まず、統合エンジンに専念する。
-
-検証済みの知見（insight-synapse dev 検証より）:
-- 完全性ガード（broken output → regenerate）: 打ち切り/不完全は再生成（最大3回）、直らなければ明示的失敗
-- 推理の完全性は**長さ基準**（最小30字）: 推理は「思考の土台」で文終端記号で終わらないため
-- 最終化は解決済み推理だけを読み、中間思考（草案同士の比較）が成果物に漏れない
+設計の要点（詳細はコードのコメント参照）:
+- **完全性ガード（broken output → regenerate）**: 打ち切り/不完全は再生成（最大3回）、直らなければ明示的失敗
+- **推理の完全性は長さ基準**（最小30字）: 推理は「思考の土台」で文終端記号で終わらないため
+- **最終化は解決済み推理だけを読み**、中間思考（草案同士の比較）が成果物に漏れない

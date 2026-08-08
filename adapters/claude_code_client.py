@@ -1,8 +1,8 @@
 """Claude Code CLI（claude -p）経由の生成アダプタ。
 
-wisdom-council-layer の「起動方式」——各エージェントを独立したサブエージェントとして
-起動する——をライブラリで再現する。各コールを 1 つの `claude -p` プロセスとして起動し、
-system（ペルソナ）は `--system-prompt` で渡す（互いの文脈を共有しない独立起動）。
+各コールを 1 つの `claude -p` プロセスとして起動する——各エージェントを独立した
+サブエージェントとして起動し、互いの文脈を共有しない独立起動をライブラリで実現する。
+system（ペルソナ）は `--system-prompt` で渡す。
 
 背景: 生 SDK（anthropic.Anthropic）は Claude Code 互換ゲートウェイが間欠的に空応答
 （200・空文字列、stop=max_tokens）を返す環境で不安定だった（2026-08-08 実測:
@@ -32,7 +32,7 @@ class ClaudeCodeClient:
     """Claude Code CLI を 1 コールごとに起動する生成アダプタ。
 
     Generator プロトコル（generate(system, user, *, temperature)）を満たす。
-    空応答・異常終了は「崩れた出力」として再試行する（wisdom-council 方式）。
+    空応答・異常終了は「崩れた出力」として再試行する（broken output → regenerate 方式）。
     """
 
     def __init__(self, *, max_retries: int = 3, timeout: int = 600) -> None:

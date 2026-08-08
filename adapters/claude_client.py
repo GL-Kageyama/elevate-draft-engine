@@ -1,7 +1,8 @@
 """Claude API クライアント（第一アダプタ）。
 
 生成（Skill）と評価（Evaluation Engine）で**必ず別モデル系統**を使う。
-POC設計書 §13「評価者の独立性（自己評価の循環の遮断）」の実装の中核。
+生成と評価が同一系統だと、評価者が自分の成果物を採点する循環評価になるため、
+系統分離は実装の中核。
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ from dataclasses import dataclass
 
 import anthropic
 
-# モデル系統（03/00 §2.6 / 11/09 §13: 独立評価系統）
+# モデル系統（独立評価系統）
 # 生成と評価で異なるモデル系統を使う。両者が同一だと循環評価になるため禁止。
 DEFAULT_GENERATION_MODEL = "claude-sonnet-4-5"
 DEFAULT_EVALUATION_MODEL = "claude-haiku-4-5"
@@ -43,7 +44,7 @@ class ClaudeConfig:
         if self.generation_model == self.evaluation_model:
             raise ValueError(
                 "generation_model と evaluation_model が同一です。"
-                "独立評価系統（11/09 §13）を保つため異なるモデルを指定してください。"
+                "独立評価系統を保つため異なるモデルを指定してください。"
             )
 
 
@@ -95,7 +96,7 @@ class ClaudeClient:
     def generate(self, system: str, user: str, *, temperature: float | None = None) -> str:
         """生成系モデルで呼び出す（Skill: Analysis 用）。
 
-        temperature は per-call で上書き可能（ver2 M2 の草案生成で多様性を
+        temperature は per-call で上書き可能（草案生成（diverge）で多様性を
         確保するために 0.7 を渡す。省略時は config の既定温度）。
         """
         return self._call(self.config.generation_model, system, user, temperature=temperature)
@@ -109,11 +110,11 @@ class ClaudeClient:
     ) -> str:
         """モデルを呼び出し、テキスト応答を返す。
 
-        空応答は「崩れた出力」として再試行する（wisdom-council-layer 方針）。
+        空応答は「崩れた出力」として再試行する（broken output → regenerate 方針）。
         実ゲートウェイ（deepseek 経由）では稀に空応答を返すことが観測され、
         これをそのまま返すと空成果物のまま評価され成功率を歪める（2026-08-08 dev検証で35%空）。
         文途中の打ち切りはここで判定しない（JSON応答の誤検出を避ける）。構造が既知の
-        呼び出し側（run_m2 の統合出力など）が再生成を担当する（wisdom-council方式）。
+        呼び出し側（統合出力など）が再生成を担当する。
         """
         temp = temperature if temperature is not None else self.config.temperature
         last_err: Exception | None = None
@@ -132,9 +133,9 @@ class ClaudeClient:
                 ).strip()
                 if text:
                     return text
-                # 空応答は「崩れた出力」として再試行（wisdom-council-layer 方針）。
+                # 空応答は「崩れた出力」として再試行（broken output → regenerate 方針）。
                 # 文途中の打ち切りはここでは判定しない（JSON応答を誤検出するため）。
-                # 構造が既知の呼び出し側（run_m2 の統合出力など）で再生成を担当する。
+                # 構造が既知の呼び出し側（統合出力など）で再生成を担当する。
                 last_err = RuntimeError("空の応答（モデルが空文字列を返した）")
                 if attempt < self.config.max_retries - 1:
                     time.sleep(2**attempt)

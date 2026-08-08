@@ -1,7 +1,7 @@
 ---
 name: elevate-draft-engine
 description: Facade to invoke the elevate-draft-engine pipeline (diverge → reconcile → finalize). Given a task, runs the Python engine via main.py, saves input + each draft + reconciliation + elevated artifact into examples/<task>/ (or a custom dir), and reports the result. All orchestration, completeness guards, and temperature control live in the engine — this skill only calls it. Use to elevate an idea through multiplicative synthesis of diverse creator drafts, or to re-synthesize existing draft files.
-argument-hint: 'JSON: {"task": "<タスク>", "agents": ["strategist","humanist",...], "method": "m2v2|m2", "engine": "claude-code|sdk|mock", "save_dir": "<任意指定; 省略で examples/<slug> に自動保存>"}'
+argument-hint: 'JSON: {"task": "<タスク>", "agents": ["strategist","humanist",...], "method": "two-stage|single-pass", "engine": "claude-code|sdk|mock", "save_dir": "<任意指定; 省略で examples/<slug> に自動保存>"}'
 ---
 
 # Elevate Draft Engine — Facade
@@ -41,7 +41,7 @@ Python エンジン側にある。**クリエイターエージェントをサ�
 |---|---|---|
 | `task` | （必須） | エレベートするタスク（自然言語） |
 | `agents` | 全8体 | 招集するクリエイターエージェント（`strategist` `humanist` `differentiator` 等） |
-| `method` | `m2v2` | `m2v2`（推理→最終化）/ `m2`（単発統合） |
+| `method` | `two-stage` | `two-stage`（推理→最終化）/ `single-pass`（単発統合） |
 | `engine` | `claude-code` | `claude-code`（`claude -p` 独立起動・安定）/ `sdk` / `mock` |
 | `save_dir` | 自動 | 保存先。省略時 `examples/<slug>/`（下記） |
 
@@ -54,8 +54,8 @@ Python エンジン側にある。**クリエイターエージェントをサ�
 ENGINE_REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ```
 
-リポジトリルートに `main.py` が無ければ、`/Users/user/AI評価者たちによる「知恵の評議会」/elevate-draft-engine`
-を直接確認する。
+リポジトリルートに `main.py` が無ければ、`ENGINE_REPO` の解決先を確認する（この skill が
+symlink されている場合は、symlink の実体があるリポジトリを探してそこを基準にする）。
 
 ### Step 3: 保存先の決定
 
@@ -69,7 +69,7 @@ cd "$ENGINE_REPO"
 .venv/bin/python main.py elevate "$TASK" \
   --engine claude-code \
   ${AGENTS:+--agents $AGENTS} \
-  --method m2v2 \
+  --method two-stage \
   --out "$SAVE_DIR"
 ```
 
@@ -122,7 +122,7 @@ $ARGUMENTS
 
 1. Locate the engine repo: `ENGINE_REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"`. Confirm main.py exists there.
 2. Resolve save_dir: if omitted, `examples/<slug of task>/`.
-3. Run: `cd "$ENGINE_REPO" && .venv/bin/python main.py elevate "$TASK" --engine claude-code [--agents ...] --method m2v2 --out "$SAVE_DIR"` (run in background if it may exceed 10 minutes).
+3. Run: `cd "$ENGINE_REPO" && .venv/bin/python main.py elevate "$TASK" --engine claude-code [--agents ...] --method two-stage --out "$SAVE_DIR"` (run in background if it may exceed 10 minutes).
 4. Verify the saved files exist and are non-empty: input.md, draft_*.md, reconciliation.md, elevated.md.
 5. Report: summarize the elevated artifact — especially the third position that no single draft contained (the multiplication). Name the save directory.
 

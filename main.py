@@ -1,7 +1,7 @@
 """elevate-draft-engine 薄い CLI。
 
 使い方:
-    python main.py generate "タスク"                 # 素のAI（B0相当）, 1 call
+    python main.py generate "タスク"                 # 素のAI（単発生成）, 1 call
     python main.py diverge "タスク"                  # 8エージェントで草案生成・一覧出力
     python main.py synthesize draft1.md draft2.md  # 外部草案を統合（核心）
     python main.py elevate "タスク"                  # diverge → synthesize 一気
@@ -10,7 +10,7 @@
 
 共通オプション:
     --mock                API 不要のモックで実行（パイプライン確認用）
-    --method m2v2|m2      統合方式（既定 m2v2: 矛盾解決推理→最終化）
+    --method two-stage|single-pass      統合方式（既定 two-stage: 矛盾解決推理→最終化）
     --agents 名前...      使用するエージェントを限定（既定: 全8エージェント）
     --out DIR             成果物をファイル保存（elevate/compare は各草案 draft_{agent}.md も保存）
 
@@ -33,7 +33,7 @@ def _build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--mock", action="store_true", help="API を使わずモックで実行")
     common.add_argument("--engine", default="sdk", choices=["sdk", "claude-code"], help="生成エンジン（既定 sdk。claude-code は claude -p 起動で安定）")
-    common.add_argument("--method", default="m2v2", choices=["m2v2", "m2"], help="統合方式（既定 m2v2）")
+    common.add_argument("--method", default="two-stage", choices=["two-stage", "single-pass"], help="統合方式（既定 two-stage）")
     common.add_argument("--agents", nargs="+", default=None, help="使用するエージェント（既定: 全エージェント）")
     common.add_argument("--out", type=Path, default=None, help="成果物を保存するディレクトリ")
 
@@ -43,7 +43,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     sub = p.add_subparsers(dest="command", required=True)
 
-    g = sub.add_parser("generate", parents=[common], help="素のAI（B0相当）で1回生成")
+    g = sub.add_parser("generate", parents=[common], help="素のAI（単発生成）で1回生成")
     g.add_argument("task", help="タスク")
     g.set_defaults(func=cmd_generate)
 
@@ -134,7 +134,7 @@ def _make_engine(args: argparse.Namespace) -> DraftEngine:
     if args.mock:
         return DraftEngine(MockGenerator())
     if args.engine == "claude-code":
-        # claude -p 経由（wisdom-council 方式の独立起動）。ゲートウェイ空応答に強い。
+        # claude -p 経由（独立プロセス起動）。ゲートウェイ空応答に強い。
         from adapters.claude_code_client import ClaudeCodeClient
 
         return DraftEngine(ClaudeCodeClient())
@@ -182,7 +182,7 @@ def _save(args: argparse.Namespace, name: str, text: str) -> None:
 
 
 def _save_input(args: argparse.Namespace, task: str) -> None:
-    """タスクを input.md として保存（examples/ の体裁: wisdom-council 風）。"""
+    """タスクを input.md として保存（examples/ の体裁）。"""
     if args.out is None:
         return
     args.out.mkdir(parents=True, exist_ok=True)
@@ -193,7 +193,7 @@ def _save_input(args: argparse.Namespace, task: str) -> None:
 
 def cmd_generate(args: argparse.Namespace) -> None:
     engine = _make_engine(args)
-    _print_artifact("素の生成（B0相当）", engine.generate(args.task))
+    _print_artifact("素の生成（単発）", engine.generate(args.task))
 
 
 def cmd_diverge(args: argparse.Namespace) -> None:
@@ -252,13 +252,13 @@ def cmd_compare(args: argparse.Namespace) -> None:
     )
     if reconciliation:
         _save(args, "reconciliation", reconciliation)
-    _print_artifact("素の生成（B0相当）", raw)
+    _print_artifact("素の生成（単発）", raw)
     _print_artifact(f"エレベート成果物（{args.method}）", elevated)
     _save(args, "raw", raw)
     _save(args, "elevated", elevated)
     if args.evaluate:
         evaluator = _make_evaluator(args)
-        _evaluate_and_report("B0（素の生成）", raw, task, evaluator)
+        _evaluate_and_report("素の生成", raw, task, evaluator)
         _evaluate_and_report("ELEVATE", elevated, task, evaluator)
 
 
