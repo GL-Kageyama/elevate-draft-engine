@@ -1,0 +1,4 @@
+anthropic>=0.49.0
+
+# 開発
+pytest
