@@ -99,7 +99,7 @@ python -m venv .venv && .venv/bin/pip install -r requirements.txt
 ```bash
 python main.py generate "タスク"                 # 素のAI（B0相当）, 1 call
 python main.py diverge "タスク"                  # 8エージェントで草案生成・一覧出力
-python main.py synthesize draft1.txt draft2.txt  # 外部草案を統合（核心）
+python main.py synthesize draft1.md draft2.md  # 外部草案を統合（核心）
 python main.py elevate "タスク"                  # diverge → synthesize 一気
 python main.py compare "タスク"                  # generate vs elevate 両方出力
 python main.py compare "タスク" --evaluate       # + 5軸評価でスコア比較

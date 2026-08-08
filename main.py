@@ -3,7 +3,7 @@
 使い方:
     python main.py generate "タスク"                 # 素のAI（B0相当）, 1 call
     python main.py diverge "タスク"                  # 8エージェントで草案生成・一覧出力
-    python main.py synthesize draft1.txt draft2.txt  # 外部草案を統合（核心）
+    python main.py synthesize draft1.md draft2.md  # 外部草案を統合（核心）
     python main.py elevate "タスク"                  # diverge → synthesize 一気
     python main.py compare "タスク"                  # generate vs elevate 両方出力
     python main.py compare "タスク" --evaluate       # + 5軸評価でスコア比較
@@ -12,7 +12,7 @@
     --mock                API 不要のモックで実行（パイプライン確認用）
     --method m2v2|m2      統合方式（既定 m2v2: 矛盾解決推理→最終化）
     --agents 名前...      使用するエージェントを限定（既定: 全8エージェント）
-    --out DIR             成果物をファイル保存（elevate/compare は各草案 draft_{agent}.txt も保存）
+    --out DIR             成果物をファイル保存（elevate/compare は各草案 draft_{agent}.md も保存）
 
 認証: ANTHROPIC_API_KEY（通常）または ANTHROPIC_AUTH_TOKEN + ANTHROPIC_BASE_URL（ゲートウェイ）。
 スロットル（空応答対策）は既定 2 秒（CLAUDE_MIN_INTERVAL_SECONDS で変更可）。
@@ -176,7 +176,7 @@ def _save(args: argparse.Namespace, name: str, text: str) -> None:
     if args.out is None:
         return
     args.out.mkdir(parents=True, exist_ok=True)
-    path = args.out / f"{name}.txt"
+    path = args.out / f"{name}.md"
     path.write_text(text)
     print(f"→ 保存: {path}")
 

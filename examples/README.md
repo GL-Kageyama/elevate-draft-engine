@@ -24,9 +24,11 @@ wisdom-council-layer の `examples/` の体裁を踏襲。
 ## 各タスクのファイル
 
 - `input.md` — 元のタスク
-- `draft_{agent}.txt` — 各エージェントの独立草案（末尾に「最強の主張」）
-- `reconciliation.txt` — 統合の下地（矛盾解決推理。最終化が読む思考の土台）
-- `elevated.txt` — 統合成果物（推理 → 最終化の結果）
+- `draft_{agent}.md` — 各エージェントの独立草案（末尾に「最強の主張」）
+- `reconciliation.md` — 統合の下地（矛盾解決推理。最終化が読む思考の土台）
+- `elevated.md` — 統合成果物（推理 → 最終化の結果）
+
+全ファイル Markdown（`.md`）で保存する。
 
 実APIはゲートウェイが間欠的に空応答を返すため、再試行上限6回
 （`CLAUDE_MAX_RETRIES`）で自己回復させる。
