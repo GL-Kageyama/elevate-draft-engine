@@ -17,6 +17,9 @@
     --out DIR             成果物をファイル保存（省略時は outputs/{タスク名}/ にデフォルト保存）
                           elevate/compare は各草案 draft_{agent}.md も保存
                           compare --runs>1 は各 run を run_NN/ サブフォルダに分離保存（履歴）
+    --output-format JSON  出力形式（OutputFormat）を明示指定（LLM 抽出をスキップ。mock でも有効）。
+                          省略時は実APIでタスクから LLM が動的に抽出し、全段階に注入する
+                          （キャッチコピー・歌詞・事業計画など分野ごとの形式）
 
 認証: ANTHROPIC_API_KEY（通常）または ANTHROPIC_AUTH_TOKEN + ANTHROPIC_BASE_URL（ゲートウェイ）。
 スロットル（空応答対策）は既定 2 秒（CLAUDE_MIN_INTERVAL_SECONDS で変更可）。
@@ -29,7 +32,8 @@ import re
 import sys
 from pathlib import Path
 
-from elevate import Draft, DraftEngine
+from elevate import Draft, DraftEngine, OutputFormat, extract_format
+from elevate.engine import ELEVATED_MAX_LENGTH, ELEVATED_MIN_LENGTH, FINALIZE_INSTRUCTION
 from elevate.engine import _detect_sentimentality
 
 
@@ -45,6 +49,11 @@ def _build_parser() -> argparse.ArgumentParser:
     common.add_argument("--runs", type=int, default=1, help="compare の比較を N 回反復して統計集計（平均・勝率・標準偏差・95%信頼区間）を出力（既定 1）")
     common.add_argument("--baseline", default="single", choices=["single", "best-of-n"], help="compare の比較対象ベースライン（既定 single: 素の単発生成 / best-of-n: 昇華なし最良草案選択＝帰無仮説）")
     common.add_argument("--logic-check", action="store_true", help="最終化の後に論理一貫性の復元工程を適用（昇華の多様化への偏りへの収束工程。既定は無効。旧5軸実測由来）")
+    common.add_argument("--output-format", default=None, metavar="JSON",
+                        help="出力形式の仕様を JSON で明示指定する（LLM 抽出をスキップ。mock でも有効。"
+                             "例: '{\"deliverable_type\":\"キャッチコピー\",\"min_output_length\":2,"
+                             "\"max_output_length\":300,\"output_is_direct\":true}'。"
+                             "未指定ならタスクから LLM が動的に抽出する（実API時のみ）。")
 
     p = argparse.ArgumentParser(
         prog="elevate-draft-engine",
@@ -269,6 +278,105 @@ def _make_evaluator(args: argparse.Namespace):
     return EvaluationEngine(ClaudeClient())
 
 
+def _parse_output_format(raw: str) -> OutputFormat:
+    """--output-format の JSON 文字列を OutputFormat に変換する（不正なら ValueError）。
+
+    extract_format と同じ検証（長さ範囲は 1 ≤ min ≤ max ≤ 100_000）を適用する。
+    """
+    import json
+
+    data = json.loads(raw)
+    lo = int(data.get("min_output_length", ELEVATED_MIN_LENGTH))
+    hi = int(data.get("max_output_length", ELEVATED_MAX_LENGTH))
+    if lo < 1 or hi < lo or hi > 100_000:
+        raise ValueError("不正な長さ範囲")
+    return OutputFormat(
+        deliverable_type=str(data.get("deliverable_type") or "成果物"),
+        description=str(data.get("description") or ""),
+        draft_guidance=str(data.get("draft_guidance") or ""),
+        finalize_guidance=str(data.get("finalize_guidance") or FINALIZE_INSTRUCTION),
+        min_output_length=lo,
+        max_output_length=hi,
+        output_is_direct=_json_bool(data.get("output_is_direct"), False),
+    )
+
+
+def _json_bool(value, default: bool = False) -> bool:
+    """JSON の真偽値（bool / "true" / "false" 文字列）を bool に正規化する。"""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "yes", "1")
+    return default
+
+
+def _resolve_output_format(args: argparse.Namespace, engine: DraftEngine) -> OutputFormat | None:
+    """タスクから出力形式（OutputFormat）を解決する。None なら従来挙動（フォーマット非認識）。
+
+    - `--output-format <JSON>` 指定時: その仕様を使う（LLM 抽出をスキップ。mock でも有効）
+    - mock 時: 抽出をスキップ（決定的な挙動を保つ。None → 従来の分析レポート前提）
+    - それ以外: `extract_format(engine.client, task)` で LLM 抽出
+      （抽出失敗は FORMAT_ANALYTICAL にフォールバック——劣化ではなく既存挙動への退避）
+    """
+    if getattr(args, "output_format", None):
+        try:
+            fmt = _parse_output_format(args.output_format)
+        except Exception as exc:
+            print(
+                f"⚠ --output-format を解釈できません（{exc}）。フォーマット認識を無効化して続行します。",
+                file=sys.stderr,
+            )
+            return None
+        print(
+            f"→ 出力形式（指定）: {fmt.deliverable_type} "
+            f"（min={fmt.min_output_length}〜max={fmt.max_output_length}字）"
+        )
+        if fmt.description:
+            print(f"  {fmt.description}")
+        if args.out is not None:
+            _save_format_spec(args, fmt)
+        return fmt
+    if args.mock:
+        return None  # mock は決定的なため抽出スキップ（従来挙動）
+    fmt = extract_format(engine.client, args.task)
+    print(
+        f"→ 出力形式（抽出）: {fmt.deliverable_type} "
+        f"（min={fmt.min_output_length}〜max={fmt.max_output_length}字）"
+    )
+    if fmt.description:
+        print(f"  {fmt.description}")
+    if args.out is not None:
+        _save_format_spec(args, fmt)
+    return fmt
+
+
+def _save_format_spec(args: argparse.Namespace, fmt: OutputFormat) -> None:
+    """抽出/指定された出力形式の仕様を format.md として保存する（透明性のため）。"""
+    if args.out is None:
+        return
+    args.out.mkdir(parents=True, exist_ok=True)
+    path = args.out / "format.md"
+    lines = [
+        "# 出力形式（OutputFormat）",
+        "",
+        f"- 成果物種別: {fmt.deliverable_type}",
+        f"- 説明: {fmt.description}",
+        f"- 出力長の範囲: {fmt.min_output_length}〜{fmt.max_output_length} 字",
+        f"- 成果物そのもの: {'はい（output_is_direct）' if fmt.output_is_direct else 'いいえ（成果物についての分析）'}",
+        "",
+        "## 草案の形式指示（draft_guidance）",
+        "",
+        fmt.draft_guidance or "（空 → 既存のテーゼ集中形式に従う）",
+        "",
+        "## 最終化の形式指示（finalize_guidance）",
+        "",
+        fmt.finalize_guidance,
+        "",
+    ]
+    path.write_text("\n".join(lines) + "\n")
+    print(f"→ 保存: {path}")
+
+
 def _agent_of(path: Path) -> str:
     """草案ファイルのエージェント名（拡張子なしのファイル名）。"""
     return path.stem
@@ -352,7 +460,8 @@ def _save_input(args: argparse.Namespace, task: str) -> None:
 
 def cmd_generate(args: argparse.Namespace) -> None:
     engine = _make_engine(args)
-    _print_artifact("素の生成（単発）", engine.generate(args.task))
+    fmt = _resolve_output_format(args, engine)
+    _print_artifact("素の生成（単発）", engine.generate(args.task, fmt=fmt))
 
 
 def _report_draft_error(agent: str, exc: Exception) -> None:
@@ -387,8 +496,9 @@ def _report_draft(args: argparse.Namespace, draft: Draft) -> None:
 def cmd_diverge(args: argparse.Namespace) -> None:
     _resolve_out(args, args.task)
     engine = _make_engine(args)
+    fmt = _resolve_output_format(args, engine)
     drafts = engine.diverge(
-        args.task, agents=args.agents,
+        args.task, agents=args.agents, fmt=fmt,
         draft_dir=args.out / "drafts" if args.out else None,
         on_draft=lambda d: _report_draft(args, d),
         on_error=_report_draft_error,
@@ -399,9 +509,10 @@ def cmd_diverge(args: argparse.Namespace) -> None:
 
 def cmd_synthesize(args: argparse.Namespace) -> None:
     engine = _make_engine(args)
+    fmt = _resolve_output_format(args, engine)
     drafts = _load_draft_files(args.draft_files)
     reconciliation, elevated = engine.synthesize_with_reconciliation(
-        drafts, method=args.method, task=args.task,
+        drafts, method=args.method, task=args.task, fmt=fmt,
         reconciliation_sink=args.out / "artifacts/reconciliation.md" if args.out else None,
         artifact_sink=args.out / "artifacts/elevated.md" if args.out else None,
     )
@@ -415,14 +526,15 @@ def cmd_elevate(args: argparse.Namespace) -> None:
     _resolve_out(args, args.task)
     engine = _make_engine(args)
     _save_input(args, args.task)
+    fmt = _resolve_output_format(args, engine)
     drafts = engine.diverge(
-        args.task, agents=args.agents,
+        args.task, agents=args.agents, fmt=fmt,
         draft_dir=args.out / "drafts" if args.out else None,
         on_draft=lambda d: _report_draft(args, d),
         on_error=_report_draft_error,
     )
     reconciliation, elevated = engine.synthesize_with_reconciliation(
-        drafts, method=args.method, task=args.task,
+        drafts, method=args.method, task=args.task, fmt=fmt,
         reconciliation_sink=args.out / "artifacts/reconciliation.md" if args.out else None,
         artifact_sink=args.out / "artifacts/elevated.md" if args.out else None,
     )
@@ -557,6 +669,7 @@ def cmd_compare(args: argparse.Namespace) -> None:
     _resolve_out(args, task)
     engine = _make_engine(args)
     _save_input(args, task)
+    fmt = _resolve_output_format(args, engine)
 
     runs = max(1, args.runs)
     baseline_scores: list[float] = []
@@ -588,13 +701,13 @@ def cmd_compare(args: argparse.Namespace) -> None:
         # run_02 以降は前回の昇華版を改修する草案（改訂草案）を書かせる（累積モード）
         draft_task = _revision_task(task, elevated_prev) if elevated_prev is not None else task
         drafts = engine.diverge(
-            draft_task, agents=run_args.agents,
+            draft_task, agents=run_args.agents, fmt=fmt,
             draft_dir=run_args.out / "drafts" if run_args.out else None,
             on_draft=lambda d: _report_draft(run_args, d),
             on_error=_report_draft_error,
         )
         reconciliation, elevated = engine.synthesize_with_reconciliation(
-            drafts, method=run_args.method, task=task,
+            drafts, method=run_args.method, task=task, fmt=fmt,
             reconciliation_sink=run_args.out / "artifacts/reconciliation.md" if run_args.out else None,
             artifact_sink=run_args.out / "artifacts/elevated.md" if run_args.out else None,
         )
@@ -609,7 +722,7 @@ def cmd_compare(args: argparse.Namespace) -> None:
             baseline = best_draft.content
         else:
             baseline = engine.generate(
-                task,
+                task, fmt=fmt,
                 sink=run_args.out / "artifacts/raw.md" if run_args.out else None,
             )
             baseline_score = None
@@ -739,6 +852,7 @@ def cmd_improve(args: argparse.Namespace) -> None:
     _resolve_out(args, task)
     engine = _make_engine(args)
     _save_input(args, task)
+    fmt = _resolve_output_format(args, engine)
 
     rounds = max(1, args.rounds)
     elevated_prev: str | None = None
@@ -761,12 +875,13 @@ def cmd_improve(args: argparse.Namespace) -> None:
             draft_task = _revision_task(task, elevated_prev)
 
         drafts = engine.diverge(
-            draft_task, agents=args.agents, draft_dir=round_args.out / "drafts" if round_args.out else None,
+            draft_task, agents=args.agents, fmt=fmt,
+            draft_dir=round_args.out / "drafts" if round_args.out else None,
             on_draft=lambda d: _report_draft(round_args, d),
             on_error=_report_draft_error,
         )
         reconciliation, elevated = engine.synthesize_with_reconciliation(
-            drafts, method=args.method, task=task,
+            drafts, method=args.method, task=task, fmt=fmt,
             reconciliation_sink=round_args.out / "artifacts/reconciliation.md" if round_args.out else None,
             artifact_sink=round_args.out / "artifacts/elevated.md" if round_args.out else None,
         )

@@ -37,6 +37,7 @@ agents/{name}.md に配置する。正本はファイル。
 from __future__ import annotations
 
 import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Protocol
@@ -349,24 +350,156 @@ def _draft_is_complete(text: str, max_length: int = DRAFT_MAX_LENGTH) -> bool:
     return stripped.endswith(_SYNTHESIS_TERMINAL_MARKERS)
 
 
-def _elevated_is_complete(text: str) -> bool:
+def _elevated_is_complete(text: str, fmt: OutputFormat | None = None) -> bool:
     """最終成果物（elevated）の完全性判定。文終端＋上限（コンパクト制約）＋下限（結論としての分量）。
 
     草案のテーゼ集中化（DRAFT_MAX_LENGTH）と同じく、最終成果物も報告書化してはならない
     （実測: 草案が500〜800字に収まっても、elevated は7000字級のまま残った——昇華が
-    過剰包摂して検証不能な数字を捏造し utility を落とす）。上限 ELEVATED_MAX_LENGTH 超過は
-    「報告書化」として不完全扱い。ただし最終成果物は結論であるため、小さすぎも
-    不合格（ELEVATED_MIN_LENGTH 未満は結論としての分量不足。2026-08-09 ユーザー指示）。
-    両者とも _generate_with_completeness_guard により再生成対象になる。
+    過剰包摂して検証不能な数字を捏造し utility を落とす）。上限超過は「報告書化」として
+    不完全扱い。ただし最終成果物は結論であるため、小さすぎも不合格（結論としての分量不足）。
+
+    fmt（OutputFormat）が渡されたら、そのフォーマット固有の {min,max}_output_length を
+    上限・下限に使う（タグラインなら数文字で合格、小説なら長くて合格、というように
+    タスクごとに適切な範囲で判定する）。fmt が無ければ既存の固定値
+    （ELEVATED_MIN/MAX_LENGTH）で判定する（後方互換）。
+    どちらの違反も _generate_with_completeness_guard により再生成対象になる。
+
+    文末記号チェックは直接成果物（fmt.output_is_direct=True: タグライン・詩・歌詞等）では
+    緩める——コピーや詩は文末記号で終わらないのが普通で（"Time to Move"）、これを要求すると
+    完成形を不完全扱いにして再生成ループに落とす。長さ範囲内で非空なら形式上の完成とみなす。
+    分析系（output_is_direct=False）は従来どおり文終端を要求する。
     """
     if not text:
         return False
-    if len(text) > ELEVATED_MAX_LENGTH:
+    min_len = fmt.min_output_length if fmt is not None else ELEVATED_MIN_LENGTH
+    max_len = fmt.max_output_length if fmt is not None else ELEVATED_MAX_LENGTH
+    if len(text) > max_len:
         return False  # 出力量過多（結論はコンパクトでなければならない）
-    if len(text) < ELEVATED_MIN_LENGTH:
+    if len(text) < min_len:
         return False  # 分量不足（結論としての最低限を欠く）
+    if fmt is not None and fmt.output_is_direct:
+        return True  # 直接成果物は長さ範囲内なら完成（タグライン等は文末記号を要しない）
     stripped = text.rstrip("*`~\t\n ")
     return stripped.endswith(_SYNTHESIS_TERMINAL_MARKERS)
+
+
+# ---- 出力フォーマット（LLM による動的抽出） ----
+#
+# パイプラインは従来、出力形式を「分析レポート（テーゼ草案 → TVRO 最終化）」に固定していた。
+# しかしキャッチコピー・歌詞・物語・設計書など、分野ごとに期待される形式は異なる
+# （実測 2026-08-09: 「キャッチコピーを開発せよ」というタスクが Target/Value/Risk/Opportunity
+# の分析レポートになった）。そこでタスクから LLM が期待される出力形式を動的に抽出し、
+# diverge → aufheben → finalize の全段階に注入する。分野の数だけフォーマットを事前定義
+# する必要はない——LLM がその場で形式を決める。
+
+@dataclass(frozen=True)
+class OutputFormat:
+    """LLM によってタスクから動的に抽出された出力形式仕様。
+
+    - deliverable_type:  成果物の種別名（例: キャッチコピー / 事業計画書 / 歌詞）
+    - draft_guidance:    エージェント草案の形式指示（空なら既存のテーゼ形式に従う）
+    - finalize_guidance: 最終化の形式指示（空でなければ TVRO の代わりに使う）
+    - output_is_direct:  True=成果物そのもの（コピー・詩・歌詞）/ False=成果物についての分析
+    """
+
+    deliverable_type: str
+    description: str
+    draft_guidance: str
+    finalize_guidance: str
+    min_output_length: int
+    max_output_length: int
+    output_is_direct: bool
+
+
+# 抽出失敗時のフォールバック（既存挙動 = 分析レポート）。各フィールドが既存の定数と一致するため、
+# fmt=FORMAT_ANALYTICAL は従来のパイプラインと完全に同一の振る舞いになる。
+FORMAT_ANALYTICAL = OutputFormat(
+    deliverable_type="分析レポート",
+    description="複数の視点を昇華した、超越的で具体的な分析。",
+    draft_guidance="",  # 空 → 既存のテーゼ形式（核心的主張/根拠/前提）に従う
+    finalize_guidance=FINALIZE_INSTRUCTION,  # TVRO
+    min_output_length=ELEVATED_MIN_LENGTH,
+    max_output_length=ELEVATED_MAX_LENGTH,
+    output_is_direct=False,
+)
+
+
+EXTRACT_FORMAT_SYSTEM = (
+    "あなたは形式分析者です。与えられたタスクから「期待される出力形式」を判定してください。"
+    "タスクを解いてはいけません——出力がどのような形を取るべきかを記述するだけです。"
+)
+
+EXTRACT_FORMAT_PROMPT = (
+    "タスク:\n{task}\n\n"
+    "このタスクの期待される出力形式を分析し、JSON オブジェクトで返してください:\n"
+    "{{\n"
+    '  "deliverable_type": "<短い形式名。例: キャッチコピー / 事業計画書 / 歌詞 / 分析レポート / 小説>",\n'
+    '  "description": "<このタスクで良い成果物とは何か。1文>",\n'
+    '  "draft_guidance": "<個々の草案執筆者への形式指示。分析系ならテーゼ形式（核心的主張/根拠/前提）、'
+    '創作系なら作品の断片や骨子、短形式なら候補+意図説明。このタスク固有に具体化せよ。>",\n'
+    '  "finalize_guidance": "<最終化工程への形式指示。汎用の Target/Value/Risk/Opportunity を'
+    'このタスクに適した構造で置き換えよ。最終成果物の形式・見出し・含むべき要素を具体的に指定せよ。>",\n'
+    '  "min_output_length": <最終成果物の下限文字数。整数>,\n'
+    '  "max_output_length": <最終成果物の上限文字数。整数。'
+    'finalize_guidance が要求する構造（節・候補数・根拠等）を収められる十分な大きさにせよ。'
+    '厳しすぎる上限は完全な成果物を弾いてしまう>,\n'
+    '  "output_is_direct": <true か false。true=成果物そのもの（コピー・詩・歌詞・小説）／'
+    'false=成果物についての分析（事業計画・仮説・レポート）>\n'
+    "}}\n"
+    "有効な JSON のみを返してください。マークダウンのコードフェンスや余計な文章は不要です。"
+)
+
+
+_format_cache: dict[str, OutputFormat] = {}
+
+
+def extract_format(generator: Generator, task: str) -> OutputFormat:
+    """タスクから期待される出力形式を LLM で動的に抽出する。
+
+    1 回の軽量 LLM 呼び出しで JSON を返させ、OutputFormat に変換する。
+    呼び出し失敗・JSON パース失敗・不正な値は FORMAT_ANALYTICAL（既存挙動）に
+    フォールバックする——劣化ではなく安全側への退避。
+    同一タスクはハッシュでメモ化し、再抽出を避ける。
+    """
+    import hashlib
+    import json
+
+    key = hashlib.sha256(task.encode("utf-8")).hexdigest()
+    if key in _format_cache:
+        return _format_cache[key]
+
+    fmt = FORMAT_ANALYTICAL
+    try:
+        raw = generator.generate(
+            EXTRACT_FORMAT_SYSTEM, EXTRACT_FORMAT_PROMPT.format(task=task), temperature=0.0
+        )
+        data = json.loads(raw)
+        lo = int(data.get("min_output_length", ELEVATED_MIN_LENGTH))
+        hi = int(data.get("max_output_length", ELEVATED_MAX_LENGTH))
+        if lo < 1 or hi < lo or hi > 100_000:
+            raise ValueError("不正な長さ範囲")
+        fmt = OutputFormat(
+            deliverable_type=str(data.get("deliverable_type") or "成果物"),
+            description=str(data.get("description") or ""),
+            draft_guidance=str(data.get("draft_guidance") or ""),
+            finalize_guidance=str(data.get("finalize_guidance") or FINALIZE_INSTRUCTION),
+            min_output_length=lo,
+            max_output_length=hi,
+            output_is_direct=_json_bool(data.get("output_is_direct"), False),
+        )
+    except Exception:
+        fmt = FORMAT_ANALYTICAL
+    _format_cache[key] = fmt
+    return fmt
+
+
+def _json_bool(value, default: bool = False) -> bool:
+    """JSON の真偽値（bool / "true" / "false" 文字列）を bool に正規化する。"""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "yes", "1")
+    return default
 
 
 def _generate_with_completeness_guard(
@@ -378,6 +511,7 @@ def _generate_with_completeness_guard(
     label: str = "昇華生成",
     is_complete=None,
     sink: Path | None = None,
+    fallback_is_complete=None,
 ) -> str:
     """指定 system で生成し、完全性ガード（broken output → regenerate）を適用する。
 
@@ -386,6 +520,13 @@ def _generate_with_completeness_guard(
     temperature を渡すことで、昇華は温度0.9、最終化は0.0を実現する。
     is_complete を渡すと判定を差し替えられる（最終化=文終端 / 止揚=長さ下限）。
 
+    fallback_is_complete を渡すと、フォーマット（OutputFormat）認識の完全性判定が
+    上限回数で満たせなかったとき、その緩和判定（通常は文終端のみ）を満たしていれば
+    最後の試行を受け入れて続行する。これは「LLMが抽出したフォーマット仕様が
+    自己矛盾（finalize_guidance が要求する構造 > max_output_length 等）で実質達成不能」な
+    場合の安全弁で、健全な成果物が残っていても仕様不整合だけでパイプライン全体が
+    落ちないようにする。form なし（既存の固定値判定）の経路は従来どおり明示的失敗する。
+
     sink が与えられたら、生成前に空ファイルを作り、on_chunk 経由で届く文字列を
     逐次追記する（草案のストリーム保存）。打ち切りで再生成するときはファイルを
     空に戻してから再開するため、失敗試行の部分文がファイルに残らない。
@@ -393,6 +534,7 @@ def _generate_with_completeness_guard(
     if is_complete is None:
         is_complete = _synthesis_is_complete
     last_err = ""
+    last_artifact = ""
     for _ in range(AUFHEBEN_MAX_ATTEMPTS):
         kwargs = {"system": system, "user": user, "temperature": temperature}
         handle = None
@@ -410,20 +552,34 @@ def _generate_with_completeness_guard(
         finally:
             if handle is not None:
                 handle.close()
+        last_artifact = artifact
         if is_complete(artifact):
             return artifact
         last_err = f"{label}が打ち切られた/不完全（…{artifact[-20:]!r}）"
+    if fallback_is_complete is not None and last_artifact and fallback_is_complete(last_artifact):
+        # フォーマット仕様が達成不能（自己矛盾）で長さだけ満たせない場合の安全弁。
+        # 崩れた出力（空・文途中打ち切り）は fallback でも弾かれる。
+        print(
+            f"⚠ {label}: フォーマット仕様を {AUFHEBEN_MAX_ATTEMPTS} 回満たせず、"
+            "構造的に完成した最後の試行を受け入れて続行します"
+            f"（{last_err}）。",
+            file=sys.stderr,
+        )
+        return last_artifact
     raise RuntimeError(f"{label}が{AUFHEBEN_MAX_ATTEMPTS}回連続で打ち切り/不完全: {last_err}")
 
 
-def _generate_synthesis(generator: Generator, synthesis_user: str, *, sink: Path | None = None) -> str:
+def _generate_synthesis(generator: Generator, synthesis_user: str, *, sink: Path | None = None,
+                        fmt: OutputFormat | None = None) -> str:
     """単発昇華（method="single-pass"）を生成する。打ち切りは再生成し、直らない場合は明示的に失敗させる。
 
     sink が与えられたら、生成前に空ファイルを作り、生成中に逐次追記する（草案と同じ）。
+    fmt が渡されたら、そのフォーマット固有の長さ範囲で完全性を判定する（タスクに応じたサイズ）。
     """
     return _generate_with_completeness_guard(
         generator, ANALYSIS_SYSTEM + SYNTHESIS_SYSTEM, synthesis_user, label="昇華生成",
-        is_complete=_elevated_is_complete, sink=sink,
+        is_complete=lambda text: _elevated_is_complete(text, fmt), sink=sink,
+        fallback_is_complete=_synthesis_is_complete if fmt is not None else None,
     )
 
 
@@ -443,24 +599,31 @@ def _generate_aufheben(generator: Generator, aufheben_user: str, *, temperature:
     )
 
 
-def _generate_finalize(generator: Generator, finalize_user: str, *, sink: Path | None = None) -> str:
+def _generate_finalize(generator: Generator, finalize_user: str, *, sink: Path | None = None,
+                       fmt: OutputFormat | None = None) -> str:
     """最終分析を生成する。打ち切りは再生成。温度は 0.0（一貫性。止揚の基盤から超越的統合を明瞭に仕上げる）。
     sink が与えられたら、生成前に空ファイルを作り、生成中に逐次追記する。
+    fmt が渡されたら、そのフォーマット固有の長さ範囲で完全性を判定する（タスクに応じたサイズ）。
     """
     return _generate_with_completeness_guard(
         generator, ANALYSIS_SYSTEM + FINALIZE_SYSTEM, finalize_user, label="最終分析",
-        is_complete=_elevated_is_complete, sink=sink,
+        is_complete=lambda text: _elevated_is_complete(text, fmt), sink=sink,
+        # フォーマット仕様が自己矛盾（抽出した finalize_guidance が求める構造 >
+        # 抽出した max_output_length）で達成不能な場合、構造的に完成した最後の試行を
+        # 受け入れて続行する（健全な成果物を仕様不整合だけで捨てない）。
+        fallback_is_complete=_synthesis_is_complete if fmt is not None else None,
     )
 
 
-def _generate_logic_check(generator: Generator, artifact: str, task: str, *, sink: Path | None = None) -> str:
+def _generate_logic_check(generator: Generator, artifact: str, task: str, *, sink: Path | None = None,
+                          fmt: OutputFormat | None = None) -> str:
     """論理一貫性の復元工程。最終成果物を検査し、矛盾があれば修正版を返す。
 
     観察された creativity +0.10 / logic -0.05 の非対称（昇華が「多様化」に偏る）への
     対応として、最終化の後に論理的一貫性を復元する収束工程を構造として追加する。
     論理を超えた飛躍（アウフヘーベンによる枠組みの創出）自体は矛盾と見なさない。
     温度は 0.0（一貫性）。完全性ガード（文終端）を適用。矛盾が無ければ元の成果物を
-    そのまま返すため、品質を下げない。
+    そのまま返すため、品質を下げない。fmt が渡されたらフォーマット固有の長さ範囲で判定する。
     """
     parts = [f"【タスク】\n{task}"] if task else []
     parts += [
@@ -470,7 +633,8 @@ def _generate_logic_check(generator: Generator, artifact: str, task: str, *, sin
     user = "\n\n".join(parts)
     return _generate_with_completeness_guard(
         generator, ANALYSIS_SYSTEM + LOGIC_CHECK_SYSTEM, user, label="論理検査",
-        is_complete=_elevated_is_complete, sink=sink,
+        is_complete=lambda text: _elevated_is_complete(text, fmt), sink=sink,
+        fallback_is_complete=_synthesis_is_complete if fmt is not None else None,
     )
 
 
@@ -497,32 +661,55 @@ def _drafts_block(drafts: list[Draft]) -> list[str]:
     return [f"【草案（観点: {d.agent}）】\n{d.content}" for d in drafts]
 
 
-def _build_aufheben_prompt(task: str, drafts: list[Draft]) -> str:
-    """止揚（アウフヘーベン）の user プロンプトを組み立てる。"""
+def _build_aufheben_prompt(task: str, drafts: list[Draft], fmt: OutputFormat | None = None) -> str:
+    """止揚（アウフヘーベン）の user プロンプトを組み立てる。
+
+    fmt が渡されたら、最終成果物の形式（deliverable_type）を意識するよう指示を追記する。
+    弁証法（否定/保存/高次化/超越的視点）自体は不変。
+    """
     parts = [f"【タスク】\n{task}"] if task else []
     parts += _drafts_block(drafts)
-    parts.append(f"【昇華指示】\n{AUFHEBEN_INSTRUCTION}")
+    instruction = AUFHEBEN_INSTRUCTION
+    if fmt is not None and fmt.draft_guidance:
+        instruction += (
+            f"\n\nこの止揚は最終的に「{fmt.deliverable_type}」を生成するための思考の土台である。"
+            f"最終出力が{fmt.deliverable_type}の形式になることを意識しつつ、弁証法的止揚を行え。"
+        )
+    parts.append(f"【昇華指示】\n{instruction}")
     return "\n\n".join(parts)
 
 
-def _build_synthesis_prompt(task: str, drafts: list[Draft]) -> str:
-    """単発昇華（method="single-pass"）の user プロンプトを組み立てる。"""
+def _build_synthesis_prompt(task: str, drafts: list[Draft], fmt: OutputFormat | None = None) -> str:
+    """単発昇華（method="single-pass"）の user プロンプトを組み立てる。
+
+    fmt が渡されたら、最終成果物の形式指示（finalize_guidance）を追記して、
+    単発昇華もタスク固有の形式で仕上げさせる（TVRO 前提にしない）。
+    """
     parts = [f"【タスク】\n{task}"] if task else []
     parts += _drafts_block(drafts)
-    parts.append(f"【昇華指示】\n{SYNTHESIS_INSTRUCTION}")
+    instruction = SYNTHESIS_INSTRUCTION
+    if fmt is not None and fmt.finalize_guidance:
+        instruction += (
+            f"\n\n最終成果物は「{fmt.deliverable_type}」の形式で仕上げよ。"
+            f"\n【最終化指示】\n{fmt.finalize_guidance}"
+        )
+    parts.append(f"【昇華指示】\n{instruction}")
     return "\n\n".join(parts)
 
 
-def _build_finalize_prompt(task: str, reconciliation: str) -> str:
+def _build_finalize_prompt(task: str, reconciliation: str, fmt: OutputFormat | None = None) -> str:
     """最終分析の user プロンプトを組み立てる。
 
     最終化は草案ではなく「止揚（アウフヘーベン）の基盤」だけを読む。止揚の中間過程が
     最終成果物に漏れないよう、高められた結論だけを書かせる。
+    fmt が渡されたら、そのフォーマット固有の finalize_guidance で TVRO を置き換える
+    （タスクに応じた形式で最終成果物を仕上げさせる）。
     """
     parts = [f"【タスク】\n{task}"] if task else []
+    finalize_instruction = fmt.finalize_guidance if (fmt is not None and fmt.finalize_guidance) else FINALIZE_INSTRUCTION
     parts += [
         f"【止揚の基盤】\n{reconciliation}",
-        f"【最終化指示】\n{FINALIZE_INSTRUCTION}",
+        f"【最終化指示】\n{finalize_instruction}",
     ]
     return "\n\n".join(parts)
 
@@ -565,16 +752,30 @@ class DraftEngine:
 
     # ---- 素の生成 ----
 
-    def generate(self, task: str, *, sink: Path | None = None) -> str:
-        """素のAI（単発生成）: 温度 0.0 で分析成果物を生成する。1 call。
+    def generate(self, task: str, *, sink: Path | None = None,
+                 fmt: OutputFormat | None = None) -> str:
+        """素のAI（単発生成）: 温度 0.0 で成果物を生成する。1 call。
 
         草案と同じ完全性ガード（broken output → regenerate）を適用する——
         打ち切られたベースラインを不公平に採点しない。sink が与えられたら、
         生成前に空ファイルを作り、生成中に逐次追記する（草案と同じ横展開）。
+
+        fmt が渡されたら、そのフォーマット固有の最終化指示をタスクに追記する
+        （compare の素の生成ベースラインにも同じフォーマットを与えて公平に比較する）。
+        完全性判定はフォーマット固有の長さ範囲で行う。
         """
+        task_for_model = task
+        if fmt is not None and fmt.finalize_guidance:
+            task_for_model = (
+                f"{task}\n\n【このタスクの最終成果物形式】\n{fmt.finalize_guidance}"
+            )
+        is_complete = (
+            (lambda text: _elevated_is_complete(text, fmt)) if fmt is not None
+            else _synthesis_is_complete  # fmt なし = 従来どおり文終端のみ（後方互換）
+        )
         return _generate_with_completeness_guard(
-            self.client, ANALYSIS_SYSTEM, task, label="素の生成",
-            is_complete=_synthesis_is_complete, sink=sink,
+            self.client, ANALYSIS_SYSTEM, task_for_model, label="素の生成",
+            is_complete=is_complete, sink=sink,
         )
 
     # ---- エージェント管理 ----
@@ -601,6 +802,7 @@ class DraftEngine:
         on_draft=None,
         draft_dir: Path | None = None,
         on_error: Callable[[str, Exception], None] | None = None,
+        fmt: OutputFormat | None = None,
     ) -> list[Draft]:
         """指定エージェント（既定は登録済み全エージェント）で独立草案を生成する。
 
@@ -625,12 +827,24 @@ class DraftEngine:
         緩める（2026-08-09、ユーザー指示）。テーゼ集中の1000字は散文の分析レポート防止用で、
         作品の完成形が長くなりうるジャンルでは、超過が失敗になるのは誤作動だった。
         判定は _is_creative_task のキーワード法。誤判定のコストはガードが緩くなるだけ。
+
+        fmt（OutputFormat）が渡されたら、そのフォーマットに従う:
+        - draft_guidance をタスクに追記して、草案の形式をタスク固有に指示する
+          （空なら既存のテーゼ形式のまま——分析レポート・フォールバック時）
+        - 草案上限は output_is_direct（成果物そのもの）なら DRAFT_MAX_LENGTH_CREATIVE、
+          それ以外は DRAFT_MAX_LENGTH。fmt が無ければ従来どおり _is_creative_task で判定。
         """
         names = agents if agents is not None else list(self._agents)
         unknown = [a for a in names if a not in self._agents]
         if unknown:
             raise ValueError(f"未登録のエージェント: {unknown}（登録済み: {list(self._agents)}）")
-        max_length = DRAFT_MAX_LENGTH_CREATIVE if _is_creative_task(task) else DRAFT_MAX_LENGTH
+        if fmt is not None:
+            max_length = DRAFT_MAX_LENGTH_CREATIVE if fmt.output_is_direct else DRAFT_MAX_LENGTH
+        else:
+            max_length = DRAFT_MAX_LENGTH_CREATIVE if _is_creative_task(task) else DRAFT_MAX_LENGTH
+        draft_task = task
+        if fmt is not None and fmt.draft_guidance:
+            draft_task = f"{task}\n\n【このタスクの草案形式】\n{fmt.draft_guidance}"
         drafts: list[Draft] = []
         for name in names:
             sink = None
@@ -638,7 +852,7 @@ class DraftEngine:
                 sink = draft_dir / f"draft_{name}.md"
             try:
                 content = _generate_draft(
-                    self.client, self._agents[name], task,
+                    self.client, self._agents[name], draft_task,
                     temperature=self.draft_temperature, sink=sink, max_length=max_length,
                 )
             except RuntimeError as exc:
@@ -660,6 +874,7 @@ class DraftEngine:
         self, drafts: list[Draft], method: str = "two-stage", task: str = "",
         *, enable_logic_check: bool | None = None,
         reconciliation_sink: Path | None = None, artifact_sink: Path | None = None,
+        fmt: OutputFormat | None = None,
     ) -> tuple[str, str]:
         """昇華し、止揚（昇華の下地）と成果物を返す。
 
@@ -672,39 +887,43 @@ class DraftEngine:
         reconciliation_sink / artifact_sink が与えられたら、それぞれの生成前に空ファイルを
         作り、生成中に逐次追記する（草案のストリーム保存と同じ横展開）。論理検査が有効な
         ときは、成果物の sink は最終化ではなく論理検査の出力に追記される（最終成果物と一致）。
+
+        fmt（OutputFormat）が渡されたら、止揚・最終化・完全性ガードをそのフォーマットに従わせる
+        （フォーマット固有の finalize_guidance で TVRO を置換、タスク固有の長さ範囲で判定）。
         """
         if not drafts:
             raise ValueError("昇華対象の草案がありません")
         if enable_logic_check is None:
             enable_logic_check = self.enable_logic_check
         if method == "two-stage":
-            aufheben_user = _build_aufheben_prompt(task, drafts)
+            aufheben_user = _build_aufheben_prompt(task, drafts, fmt)
             reconciliation = _generate_aufheben(
                 self.client, aufheben_user, temperature=self.draft_temperature,
                 sink=reconciliation_sink,
             )
-            finalize_user = _build_finalize_prompt(task, reconciliation)
+            finalize_user = _build_finalize_prompt(task, reconciliation, fmt)
             artifact = _generate_finalize(
-                self.client, finalize_user,
+                self.client, finalize_user, fmt=fmt,
                 sink=None if enable_logic_check else artifact_sink,
             )
             if enable_logic_check:
-                artifact = _generate_logic_check(self.client, artifact, task, sink=artifact_sink)
+                artifact = _generate_logic_check(self.client, artifact, task, sink=artifact_sink, fmt=fmt)
             return reconciliation, artifact
         if method == "single-pass":
-            synthesis_user = _build_synthesis_prompt(task, drafts)
+            synthesis_user = _build_synthesis_prompt(task, drafts, fmt)
             artifact = _generate_synthesis(
-                self.client, synthesis_user,
+                self.client, synthesis_user, fmt=fmt,
                 sink=None if enable_logic_check else artifact_sink,
             )
             if enable_logic_check:
-                artifact = _generate_logic_check(self.client, artifact, task, sink=artifact_sink)
+                artifact = _generate_logic_check(self.client, artifact, task, sink=artifact_sink, fmt=fmt)
             return "", artifact
         raise ValueError(f"未知の method: {method!r}（'two-stage' または 'single-pass'）")
 
     def synthesize(
         self, drafts: list[Draft], method: str = "two-stage", task: str = "",
         *, enable_logic_check: bool | None = None,
+        fmt: OutputFormat | None = None,
     ) -> str:
         """複数の独立草案を昇華（アウフヘーベン）して一段高い成果物を返す。
 
@@ -713,9 +932,10 @@ class DraftEngine:
 
         drafts は外部草案（人間の専門家が書いた分析、別モデルの出力等）でもよい。
         出所を問わず「複数の異なる視点」を突っ込めば一段高い昇華を返す。
+        fmt が渡されたら、止揚・最終化・完全性ガードをそのフォーマットに従わせる。
         """
         _, artifact = self.synthesize_with_reconciliation(
-            drafts, method=method, task=task, enable_logic_check=enable_logic_check
+            drafts, method=method, task=task, enable_logic_check=enable_logic_check, fmt=fmt
         )
         return artifact
 
@@ -725,9 +945,13 @@ class DraftEngine:
         self, task: str, method: str = "two-stage", agents: list[str] | None = None,
         *, enable_logic_check: bool | None = None,
         on_error: Callable[[str, Exception], None] | None = None,
+        fmt: OutputFormat | None = None,
     ) -> str:
-        """diverge → synthesize を一気に行う。"""
-        drafts = self.diverge(task, agents=agents, on_error=on_error)
+        """diverge → synthesize を一気に行う。
+
+        fmt が渡されたら、発散の草案形式・止揚・最終化・完全性ガードをそのフォーマットに従わせる。
+        """
+        drafts = self.diverge(task, agents=agents, on_error=on_error, fmt=fmt)
         return self.synthesize(
-            drafts, method=method, task=task, enable_logic_check=enable_logic_check
+            drafts, method=method, task=task, enable_logic_check=enable_logic_check, fmt=fmt
         )

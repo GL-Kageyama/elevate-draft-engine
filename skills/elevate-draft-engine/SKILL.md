@@ -1,14 +1,14 @@
 ---
 name: elevate-draft-engine
 description: Facade to invoke the elevate-draft-engine pipeline (diverge → aufheben → finalize). Given a task, runs the Python engine via main.py, saves input + each draft + reconciliation + elevated artifact into examples/<task>/ (or a custom dir), and reports the result. Supports elevate / improve（昇華版→改修草案→昇華の反復）/ compare（素の生成 vs 昇華の実測）. All orchestration, completeness guards, and temperature control live in the engine — this skill only calls it. Use to elevate an idea through dialectical sublation (Aufheben) of maximally-divergent creator drafts, to re-sublimate existing draft files, to iteratively refine an elevated artifact, or to measure whether aufheben beats single-shot generation.
-argument-hint: 'JSON: {"command": "elevate|improve|compare|synthesize", "task": "<タスク>", "agents": ["strategist","humanist",...], "method": "two-stage|single-pass", "engine": "claude-code|sdk|mock", "rounds": 3, "evaluate": true, "min_improve": 0.01, "quality_ceiling": 0.85, "runs": 1, "baseline": "single|best-of-n", "save_dir": "<任意指定; 省略で examples/<slug> に自動保存>"}'
+argument-hint: 'JSON: {"command": "elevate|improve|compare|synthesize", "task": "<タスク>", "agents": ["strategist","humanist",...], "method": "two-stage|single-pass", "engine": "claude-code|sdk|mock", "rounds": 3, "evaluate": true, "min_improve": 0.01, "quality_ceiling": 0.85, "runs": 1, "baseline": "single|best-of-n", "output_format": "<任意指定; OutputFormat の JSON。省略でタスクから LLM が動的に抽出>", "save_dir": "<任意指定; 省略で examples/<slug> に自動保存>"}'
 ---
 
 # Elevate Draft Engine — Facade
 
 ## Skill Metadata
 - **id**: `elevate-draft-engine`
-- **version**: `2.0.0`
+- **version**: `2.1.0`
 - **category**: `facade`（runbook。オーケストレーションは Python エンジンが担当）
 - **standalone**: `true`（サブエージェントを必要としない。エージェントはエンジンが `agents/*.md` から読む）
 - **requires_agents**: `[]`
@@ -52,6 +52,7 @@ Python エンジン側にある。**クリエイターエージェントをサ�
 | `quality_ceiling` | `0.85` | `improve --evaluate` の高品位停止しきい値。昇華版の overall がこれ以上なら改修ラウンドを生成せず停止（既に高品位な成果物は改修で壊れやすいため。実測: story-plot 0.860→0.520） |
 | `runs` | `1` | `compare` のみ: 比較を N 回反復し統計集計（平均・勝率・標準偏差・95%CI）を出力 |
 | `baseline` | `single` | `compare` のみ: `single`（素の単発生成）/ `best-of-n`（昇華しない最良草案選択＝帰無仮説） |
+| `output_format` | 動的抽出 | OutputFormat の JSON を明示指定（LLM 抽出をスキップ。mock でも有効）。省略時は実APIでタスクから LLM が動的に抽出（キャッチコピー・歌詞・事業計画など分野ごとの形式） |
 | `save_dir` | 自動 | 保存先。省略時 `examples/<slug>/`（下記） |
 
 ### Step 2: エンジンの場所を特定する
@@ -92,8 +93,19 @@ cd "$ENGINE_REPO"
   ただし**創作系タスク**（歌詞/小説/物語/詩/キャッチコピー等、`_is_creative_task` のキーワード判定）
   は完成作品が長くなりうるため上限を `DRAFT_MAX_LENGTH_CREATIVE`=3000に緩める
   （実測 2026-08-09: 歌詞1116字が1000字上限で3回失敗し行列が落ちた）
+- **出力フォーマット認識**（2026-08-09）: 実API時はパイプライン開始前にタスクから
+  **期待される出力形式を LLM が動的に抽出**する（`extract_format`。1回の軽量コール。
+  抽出結果は `--out/format.md` に保存）。抽出した `OutputFormat` を全段階に注入——
+  エージェント草案には `draft_guidance`（タスク固有の草案形式）を追記、最終化は
+  `finalize_guidance` で汎用の TVRO を置換、完全性ガードはタスク固有の
+  `{min,max}_output_length` で判定（5字のタグラインが固定下限300で再生成される
+  「キャッチコピー→分析レポート化」問題の根本対処）。`--output-format '<JSON>'` で
+  明示指定もできる（抽出をスキップ。mock でも有効）。抽出失敗は既存挙動
+  （分析レポート前提）にフォールバックする。抽出した仕様が自己矛盾（要求構造 >
+  max 等）で達成不能な場合は、上限回数後、構造的に完成した最後の試行を安全弁で受け入れる。
 - 最終成果物（`elevated.md`）にも**両方向のサイズ制約**（`ELEVATED_MIN_LENGTH`=300〜`ELEVATED_MAX_LENGTH`=1500）——
   結論なので小さすぎも、報告書化の過剰包摂も不合格で再生成
+  （タスク固有の `OutputFormat` が抽出された場合はその長さ範囲で判定）
 - 既存の草案ファイル群（人間が書いた分析等）を昇華する場合は `synthesize` を使う:
 
 ```bash
@@ -187,6 +199,7 @@ Rules:
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 2.1.0 | 2026-08-09 | **出力フォーマット認識**を追加。実API時にタスクから期待される出力形式を LLM が動的に抽出（`extract_format`）し、diverge（草案形式）・finalize（TVRO置換）・完全性ガード（タスク固有の長さ範囲）に注入。キャッチコピーが分析レポートになる根本原因を解消。`--output-format '<JSON>'` で明示指定も可能（mock でも有効）。抽出失敗は既存挙動にフォールバック |
 | 2.0.1 | 2026-08-09 | `improve` に高品位停止を追加（`--quality-ceiling` 既定 0.85）。overall がしきい値以上なら改修ラウンドを生成せず停止（実測: story-plot 0.860→0.520 の過修正を防ぐ）。停止理由は progress.md に記録 |
 | 2.0.0 | 2026-08-08 | 中核機構を「論理的な統合（synthesis）」から「弁証法的昇華（Aufheben）」へ衣替え。DIVERGE は温度0.9で極限まで逸脱し、昇華推理が否定・保存・高次化の三契機で矛盾を包括する枠組みを創出する。DIVERGE → AUFHEBEN → FINALIZE の3段構え（用語変更ではなく機構変更） |
 | 1.3.0 | 2026-08-08 | 起動時にユーザーへリポジトリ全体の概要を改行・段落で簡潔に伝える手順を Procedure 冒頭に追加 |
