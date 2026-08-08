@@ -31,6 +31,43 @@ def test_stat_summary_single_value_zero_sd() -> None:
     assert "sd=0.000" in s
 
 
+def test_stat_summary_uses_sample_variance() -> None:
+    """標準偏差は標本分散（n-1）で計算される（小標本での不偏推定）。"""
+    # 値: 0.6, 0.8 → mean 0.7、標本分散 (0.01+0.01)/(2-1)=0.02 → sd=0.1414
+    s = main._stat_summary([0.6, 0.8])
+    assert "sd=0.141" in s
+
+
+# ---- 統計量（信頼区間・効果量） ----
+
+def test_mean_confidence_interval_single_value_degenerate() -> None:
+    """n=1 では平均の信頼区間が一点に潰れる（開かない）。"""
+    lo, hi = main._mean_confidence_interval([0.8])
+    assert lo == hi == 0.8
+
+
+def test_mean_confidence_interval_brackets_mean() -> None:
+    """n>1 では区間が標本平均を挟む（小標本は t 分布で広く開く）。"""
+    vals = [0.8, 0.9, 0.7, 0.85, 0.75]
+    lo, hi = main._mean_confidence_interval(vals)
+    mean = sum(vals) / len(vals)
+    assert lo < mean < hi
+
+
+def test_wilson_interval_wins_all_brackets_high() -> None:
+    """全勝でも 95%CI の下側は 0 でない（Wilson 区間は p=1 で潰れない）。"""
+    lo, hi = main._wilson_interval(3, 3)
+    assert hi == 1.0
+    assert 0.0 < lo < 1.0
+
+
+def test_cohens_d_computes_effect_size() -> None:
+    """統合がベースラインを上回るとき正の効果量になる。"""
+    d = main._cohens_d([0.7, 0.72, 0.71], [0.85, 0.87, 0.86])
+    assert d > 0
+    assert d > 1.0  # 明確に分離している場合は大きな効果量
+
+
 # ---- _best_of_n ----
 
 def test_best_of_n_selects_highest_overall_draft() -> None:
@@ -60,12 +97,16 @@ def test_mock_evaluator_scores_drafts_by_name() -> None:
 
 
 def test_mock_evaluator_constant_for_non_draft() -> None:
-    """草案以外（素の生成・統合成果物）は一定のスコア（0.8）になる。"""
+    """草案以外（素の生成・統合成果物）は一定のスコア（0.6）になる。
+
+    ルーブリック再調整（2026-08-08）で「普通」は 0.6（旧 0.8 は天井で向上が可視化できない）。
+    ポリシー密着5軸（2026-08-08 再調整(3)）の下では全軸が base のため overall = base。
+    """
     ev = main.MockEvaluator()
     a = ev.evaluate("普通の成果物テキスト。", "タスク")
     b = ev.evaluate("別の普通の成果物テキスト。", "タスク")
     assert a.overall == b.overall
-    assert a.overall == pytest.approx(0.8 * 0.9 + (1 - 0.3) * 0.1)  # compute_overall(0.8,…)
+    assert a.overall == pytest.approx(0.6)  # 均等重み0.20×5軸のため overall = base（反転なし）
 
 
 # ---- MockGenerator（--no-strong-claim でもエージェント草案を識別） ----
@@ -201,3 +242,66 @@ def test_compare_single_run_out_flat(tmp_path) -> None:
     assert code == 0
     assert (tmp_path / "elevated.md").exists()
     assert not list(tmp_path.glob("run_*")), "--runs 1 で run_* フォルダを作らない"
+
+
+# ---- 統計報告の強化（信頼区間・効果量・保存率） ----
+
+def test_compare_runs_reports_confidence_intervals(tmp_path) -> None:
+    """--runs N の集計に Wilson 勝率CI・差のtCI・Cohen's d が含まれる。"""
+    code, out = _run_compare(
+        ["compare", "タスク", "--mock", "--evaluate", "--runs", "3"], cwd=tmp_path
+    )
+    assert code == 0
+    assert "95%CI" in out
+    assert "Cohen's d" in out
+    assert "Wilson" in out
+
+
+def test_compare_measurement_md_includes_cis(tmp_path) -> None:
+    """measurement.md に信頼区間・効果量が保存される。"""
+    code, _ = _run_compare(
+        ["compare", "タスク", "--mock", "--evaluate", "--runs", "3", "--out", str(tmp_path)]
+    )
+    assert code == 0
+    text = (tmp_path / "measurement.md").read_text()
+    assert "勝率 95%CI（Wilson）" in text
+    assert "差の 95%CI（t, 両側）" in text
+    assert "効果量（Cohen's d）" in text
+    assert "具体性保存率" in text  # --evaluate で自動計算される
+
+
+# ---- 温度近似の誤差定量（calibrate） ----
+
+def test_calibrate_mock_writes_calibration_md(tmp_path) -> None:
+    """calibrate はモックで動作し、calibration.md を保存する。"""
+    code, out = _run_compare(
+        ["calibrate", "タスク", "--mock", "--runs", "3", "--out", str(tmp_path)]
+    )
+    assert code == 0
+    assert "完了（n=3）" in out
+    path = tmp_path / "calibration.md"
+    assert path.exists()
+    text = path.read_text()
+    assert "温度近似の誤差定量" in text
+    assert "| sdk |" in text
+    assert "| claude-code |" in text
+    assert "type-token比" in text
+
+
+def test_calibrate_engines_restriction(tmp_path) -> None:
+    """--engines で比較するエンジンを指定できる。"""
+    code, out = _run_compare(
+        ["calibrate", "タスク", "--mock", "--runs", "2", "--engines", "sdk", "--out", str(tmp_path)]
+    )
+    assert code == 0
+    text = (tmp_path / "calibration.md").read_text()
+    assert "| claude-code |" not in text  # テーブル行に含まれない
+    assert "| sdk |" in text
+
+
+def test_text_features_measures_ttr_and_headings() -> None:
+    """_text_features は長さ・type-token比・見出し数を返す。"""
+    f = main._text_features("# 見出し\n\nこれはテスト文です。これはテスト文です。")
+    assert f["length"] > 0
+    assert f["heading_count"] == 1
+    assert 0.0 < f["type_token_ratio"] <= 1.0

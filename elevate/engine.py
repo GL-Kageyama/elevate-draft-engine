@@ -160,6 +160,61 @@ FINALIZE_INSTRUCTION = (
     "4. 確信できる点は断定的に、不確実な点は前提として明示する"
 )
 
+# ---- 論理一貫性の復元工程（--logic-check） ----
+# 実測（n=1、旧5軸: creativity/logic）で ELEVATE は creativity +0.10 に対して logic -0.05。
+# 統合が「完成させる」より「多様化する」方向へ偏る可能性を示唆する（旧軸の観察。
+# 2026-08-08 再調整(3)で5軸が多様性/統合性/超越性/誠実性/実用性に変わったため、
+# この数値は旧軸のままの記録である）。最終化の後に論理的一貫性を検証・
+# 復元する収束工程を構造として追加する（既定は無効。仮説の検証手段として使う）。
+LOGIC_CHECK_SYSTEM = (
+    "あなたは論理検証者です。与えられた成果物を読み、論理的矛盾・根拠の飛躍・"
+    "整合性の欠如を検査してください。矛盾を検出した場合は修正した最終版だけを出力し、"
+    "矛盾が無ければ元の成果物をそのまま出力してください。"
+)
+
+LOGIC_CHECK_INSTRUCTION = (
+    "以下の成果物を論理的に検査せよ:\n"
+    "1. 観点間で主張が矛盾していないか\n"
+    "2. 根拠のない飛躍（断言と論拠の不一致）がないか\n"
+    "3. 具体的・整合的・実行可能な状態か\n"
+    "矛盾を検出したら、修正した最終版だけを出力せよ（検査の経緯・説明は含めない）。\n"
+    "矛盾が無ければ、元の成果物をそのまま出力せよ。"
+)
+
+# ---- 感情の道具化ガード（soft guard） ----
+# 知恵の評議会の指摘「末期がんの物語が評定点向上のてこに道具化される危険」への対応。
+# DIVERGE は「外れる許可」を与えるため、型通りの感情定式（泣かせ定式）に転落しうる。
+# ここでは再生成せず、検出を警告として知らせる（本物の感情的真実まで弾かないため）。
+_TERMINAL_PATTERNS = ("末期がん", "末期癌", "余命", "ステージ4", "ステージⅣ", "終末期")
+_ELDER_PATTERNS = ("73歳", "高齢", "老人", "介護")
+_ABANDON_PATTERNS = ("見捨てられ", "見放され", "置き去り", "孤独死", "見捨てた")
+_CLICHE_EMOTION_PATTERNS = (
+    "涙が止まらない", "胸が熱くなる", "感動を届ける", "心を打つ", "泣ける", "感情を揺さぶる",
+)
+
+
+def _sentimentality_detail(text: str) -> dict[str, bool]:
+    """型通りの感情定式（泣かせ定式）の各要素を検出する（soft guard の詳細）。"""
+    terminal = any(p in text for p in _TERMINAL_PATTERNS)
+    elderly = any(p in text for p in _ELDER_PATTERNS)
+    abandonment = any(p in text for p in _ABANDON_PATTERNS)
+    cliche = any(p in text for p in _CLICHE_EMOTION_PATTERNS)
+    return {
+        "terminal_illness": terminal,
+        "elderly": elderly,
+        "abandonment": abandonment,
+        "cliche_emotion": cliche,
+        # 三項共起（末期 × 高齢 × 見捨て）は「感情の鍵」の典型。型通りの感傷定式も対象。
+        "trope": terminal and elderly and abandonment,
+    }
+
+
+def _detect_sentimentality(text: str) -> bool:
+    """型通りの感情定式かどうか（soft guard）。検出しても再生成はしない。"""
+    d = _sentimentality_detail(text)
+    return d["trope"] or d["cliche_emotion"]
+
+
 # ---- 草案生成の温度（多様性の確保）。統合・最終化・評価は 0.0（一貫性のため） ----
 DRAFT_TEMPERATURE = 0.7
 
@@ -303,6 +358,25 @@ def _generate_finalize(generator: Generator, finalize_user: str) -> str:
     )
 
 
+def _generate_logic_check(generator: Generator, artifact: str, task: str) -> str:
+    """論理一貫性の復元工程。最終成果物を検査し、矛盾があれば修正版を返す。
+
+    観察された creativity +0.10 / logic -0.05 の非対称（統合が「多様化」に偏る）への
+    対応として、最終化の後に論理的一貫性を復元する収束工程を構造として追加する。
+    温度は 0.0（一貫性）。完全性ガード（文終端）を適用。矛盾が無ければ元の成果物を
+    そのまま返すため、品質を下げない。
+    """
+    parts = [f"【タスク】\n{task}"] if task else []
+    parts += [
+        f"【成果物】\n{artifact}",
+        f"【論理検査指示】\n{LOGIC_CHECK_INSTRUCTION}",
+    ]
+    user = "\n\n".join(parts)
+    return _generate_with_completeness_guard(
+        generator, ANALYSIS_SYSTEM + LOGIC_CHECK_SYSTEM, user, label="論理検査"
+    )
+
+
 def _generate_draft(
     generator: Generator, system: str, user: str, *, temperature: float, sink: Path | None = None
 ) -> str:
@@ -375,9 +449,11 @@ class DraftEngine:
         agents_dir: str | Path | None = None,
         agents: dict[str, str] | None = None,
         strong_claim_frame: bool = True,
+        enable_logic_check: bool = False,
     ):
         self.client = client
         self.draft_temperature = draft_temperature
+        self.enable_logic_check = enable_logic_check
         if agents is not None:
             self._agents: dict[str, str] = dict(agents)
         else:
@@ -450,28 +526,43 @@ class DraftEngine:
     # ---- SYNTHESIZE（核心） ----
 
     def synthesize_with_reconciliation(
-        self, drafts: list[Draft], method: str = "two-stage", task: str = ""
+        self, drafts: list[Draft], method: str = "two-stage", task: str = "",
+        *, enable_logic_check: bool | None = None,
     ) -> tuple[str, str]:
         """統合し、推理（統合の下地）と成果物を返す。
 
         戻り値: (reconciliation, artifact)。method="single-pass" は推理が無いため ("", artifact)。
         推理を保存したい呼び出し側（CLI の --out 等）はこちらを使う。
+
+        enable_logic_check=True で、最終化の後に論理一貫性の復元工程（_generate_logic_check）
+        を適用する（既定: エンジンのコンストラクタ設定に従う。false なら従来動作のまま）。
         """
         if not drafts:
             raise ValueError("統合対象の草案がありません")
+        if enable_logic_check is None:
+            enable_logic_check = self.enable_logic_check
         if method == "two-stage":
             reconcile_user = _build_reconciliation_prompt(task, drafts)
             reconciliation = _generate_reconciliation(
                 self.client, reconcile_user, temperature=self.draft_temperature
             )
             finalize_user = _build_finalize_prompt(task, reconciliation)
-            return reconciliation, _generate_finalize(self.client, finalize_user)
+            artifact = _generate_finalize(self.client, finalize_user)
+            if enable_logic_check:
+                artifact = _generate_logic_check(self.client, artifact, task)
+            return reconciliation, artifact
         if method == "single-pass":
             synthesis_user = _build_synthesis_prompt(task, drafts)
-            return "", _generate_synthesis(self.client, synthesis_user)
+            artifact = _generate_synthesis(self.client, synthesis_user)
+            if enable_logic_check:
+                artifact = _generate_logic_check(self.client, artifact, task)
+            return "", artifact
         raise ValueError(f"未知の method: {method!r}（'two-stage' または 'single-pass'）")
 
-    def synthesize(self, drafts: list[Draft], method: str = "two-stage", task: str = "") -> str:
+    def synthesize(
+        self, drafts: list[Draft], method: str = "two-stage", task: str = "",
+        *, enable_logic_check: bool | None = None,
+    ) -> str:
         """複数の独立草案を統合して一段高い成果物を返す。
 
         - method="two-stage": 矛盾解決推理 → 最終化（2段階統合。温度: 推理 0.7 / 最終化 0.0）
@@ -480,12 +571,19 @@ class DraftEngine:
         drafts は外部草案（人間の専門家が書いた分析、別モデルの出力等）でもよい。
         出所を問わず「複数の異なる視点」を突っ込めば一段高い統合を返す。
         """
-        _, artifact = self.synthesize_with_reconciliation(drafts, method=method, task=task)
+        _, artifact = self.synthesize_with_reconciliation(
+            drafts, method=method, task=task, enable_logic_check=enable_logic_check
+        )
         return artifact
 
     # ---- 便利ラッパー ----
 
-    def elevate(self, task: str, method: str = "two-stage", agents: list[str] | None = None) -> str:
+    def elevate(
+        self, task: str, method: str = "two-stage", agents: list[str] | None = None,
+        *, enable_logic_check: bool | None = None,
+    ) -> str:
         """diverge → synthesize を一気に行う。"""
         drafts = self.diverge(task, agents=agents)
-        return self.synthesize(drafts, method=method, task=task)
+        return self.synthesize(
+            drafts, method=method, task=task, enable_logic_check=enable_logic_check
+        )

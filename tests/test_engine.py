@@ -19,9 +19,11 @@ from elevate import Draft, DraftEngine  # noqa: E402
 from elevate.engine import (  # noqa: E402
     ANALYSIS_SYSTEM,
     FINALIZE_SYSTEM,
+    LOGIC_CHECK_SYSTEM,
     RECONCILIATION_SYSTEM,
     SYNTHESIS_SYSTEM,
     SYNTHESIS_MAX_ATTEMPTS,
+    _detect_sentimentality,
     _strip_strong_claim,
     load_agents,
 )
@@ -484,3 +486,103 @@ def test_completeness_guard_raises_after_max_attempts() -> None:
     with pytest.raises(RuntimeError, match="打ち切り/不完全"):
         engine.synthesize(_draft_pair())
     assert client.calls == SYNTHESIS_MAX_ATTEMPTS
+
+
+# ---- 論理一貫性の復元工程（--logic-check） ----
+
+def test_synthesize_logic_check_adds_third_call() -> None:
+    """enable_logic_check=True で最終化の後に論理検査が追加呼び出しされる（3 call）。"""
+    client = MockGenerator()
+    engine = DraftEngine(client, enable_logic_check=True)
+    engine.synthesize(_draft_pair())
+    assert len(client.calls) == 3
+    assert LOGIC_CHECK_SYSTEM in client.calls[-1]["system"]
+    # 論理検査は温度 0.0（一貫性のため）
+    assert client.calls[-1]["temperature"] is None
+
+
+def test_synthesize_logic_check_disabled_no_extra_call() -> None:
+    """既定（無効）では追加呼び出しが無い（従来の 2 call のまま）。"""
+    client = MockGenerator()
+    engine = DraftEngine(client)  # enable_logic_check は既定 False
+    engine.synthesize(_draft_pair())
+    assert len(client.calls) == 2
+
+
+def test_synthesize_logic_check_method_override() -> None:
+    """呼び出し時 enable_logic_check がコンストラクタ設定を上書きできる。"""
+    client = MockGenerator()
+    engine = DraftEngine(client, enable_logic_check=False)
+    engine.synthesize(_draft_pair(), enable_logic_check=True)
+    assert len(client.calls) == 3
+
+
+# ---- 感情の道具化ガード（soft guard） ----
+
+def test_detect_sentimentality_three_term_trope() -> None:
+    """末期疾患 × 高齢 × 見捨てられ の三項共起は型通りの感傷として検出される。"""
+    text = "藤原浩一、73歳。ステージ4の膵臓がん。余命半年。見捨てられた。"
+    assert _detect_sentimentality(text) is True
+
+
+def test_detect_sentimentality_missing_term_not_detected() -> None:
+    """三項の一部だけでは検出しない（末期疾患だけでは自然な悲しみ文脈と区別できない）。"""
+    assert _detect_sentimentality("末期がんと闘う患者の記録。") is False
+
+
+def test_detect_sentimentality_cliche_emotion() -> None:
+    """型通りの感傷定式（泣かせ定式）は単独でも検出される。"""
+    assert _detect_sentimentality("この物語は涙が止まらない。") is True
+
+
+def test_detect_sentimentality_natural_text_not_detected() -> None:
+    """自然な共感文は誤検出しない（正の具体として機能する）。"""
+    text = "高齢者の孤立は地域の見守りで支えられる。介護の現場では変化が起きている。"
+    assert _detect_sentimentality(text) is False
+
+
+# ---- 具体性保存指数（evaluation/specificity.py） ----
+
+def test_preservation_rate_counts_surviving_concrete_tokens() -> None:
+    """発散草案の具体トークン（カタカナ・数字・英単語）が統合にどれだけ残るか。"""
+    from evaluation.specificity import compute_preservation_rate
+
+    drafts = [
+        Draft(agent="strategist", content="ゾンビ知識を0件にするナレッジAIを設計する。"),
+        Draft(agent="humanist", content="見捨てられた73歳の祖父をAIが見守る。"),
+    ]
+    # elevated: カタカナ語（ゾンビ・ナレッジ・AI）、数字（0・73）は一部残る
+    elevated = "ナレッジAIでゾンビ知識を0件にし、高齢者を見守る統合案である。"
+    result = compute_preservation_rate(drafts, elevated)
+    assert result["preservation_rate"] is not None
+    assert 0.0 < result["preservation_rate"] < 1.0
+    assert "ゾンビ" in result["matched"]
+    assert "ナレッジ" in result["matched"]
+    assert "0" in result["matched"]
+    # per_draft はエージェント名ごとに集計される
+    assert "strategist" in result["per_draft"]
+    assert "humanist" in result["per_draft"]
+
+
+def test_preservation_rate_empty_source_resilient() -> None:
+    """具体トークンが無い草案では preservation_rate が None（評価不能）になる。"""
+    from evaluation.specificity import compute_preservation_rate
+
+    drafts = [Draft(agent="designer", content="おはようございます。")]  # カタカナ・数字・英単語なし
+    result = compute_preservation_rate(drafts, "統合成果物。")
+    assert result["preservation_rate"] is None
+    assert result["source_tokens"] == []
+
+
+def test_preservation_rate_external_get_content() -> None:
+    """Draft 以外のオブジェクトにも get_content で対応できる。"""
+    from evaluation.specificity import compute_preservation_rate
+
+    class _X:
+        def __init__(self, agent: str, body: str) -> None:
+            self.agent = agent
+            self.body = body
+
+    xs = [_X("a", "ゲームAIの設計。"), _X("b", "APIの設計。")]
+    result = compute_preservation_rate(xs, "ゲームAIとAPIを統合した。", get_content=lambda x: x.body)
+    assert result["preservation_rate"] == 1.0
