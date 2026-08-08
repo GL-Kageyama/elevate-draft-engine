@@ -3,12 +3,18 @@
 各ドメインの measurement.md を集計し、統合が素AI生成を上回っているかを
 事前登録した規則で判定する（停止バイアスを防ぐため、基準はデータを見る前に固定）。
 
-打ち切り規則（ユーザー承認済み・2026-08-08）:
+打ち切り規則（ユーザー承認済み・2026-08-08 中立ベースラインで再登録）:
     完了済み run の累積勝率 ≤ 50% かつ ELEVATE 平均差 ≤ 0 → 残りの行列を打ち切り。
+    規則はデータを見る前に固定する（停止バイアス防止）。
+
+再登録（2026-08-08）: 素の生成ベースラインを中立化（ANALYSIS_SYSTEM が複数視点を
+誘引しないように修正）したため、旧設計の測定（knowledge-search 等）は混ぜない。
+比較対象ドメインは --domains で明示する。
 
 使い方:
     python examples/check_matrix_progress.py                    # 全ドメインを集計して判定
-    python examples/check_matrix_progress.py --json             # 機械可読な結果
+    python examples/check_matrix_progress.py --domains A B C   # 指定ドメインのみ集計
+    python examples/check_matrix_progress.py --json            # 機械可読な結果
 """
 
 from __future__ import annotations
@@ -36,9 +42,11 @@ def _parse_measurement(path: Path) -> dict | None:
     }
 
 
-def collect() -> list[dict]:
+def collect(domains: list[str] | None = None) -> list[dict]:
     rows = []
     for md in sorted(EXAMPLES.glob("*/measurement.md")):
+        if domains and md.parent.name not in domains:
+            continue  # 新設計の行列ドメインのみ集計（旧設計の測定を混ぜない）
         row = _parse_measurement(md)
         if row:
             rows.append(row)
@@ -68,10 +76,14 @@ def decide(rows: list[dict]) -> dict:
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="行列の進行確認と打ち切り判定")
+    p.add_argument(
+        "--domains", nargs="*", default=None,
+        help="集計対象ドメイン（例: ledger-2agents ledger-4agents ml-hypothesis）。省略時は全ドメイン",
+    )
     p.add_argument("--json", action="store_true", help="機械可読な結果")
     args = p.parse_args(argv)
 
-    rows = collect()
+    rows = collect(args.domains)
     summary = decide(rows)
     if args.json:
         print(json.dumps({"rows": rows, **summary}, ensure_ascii=False, indent=2))

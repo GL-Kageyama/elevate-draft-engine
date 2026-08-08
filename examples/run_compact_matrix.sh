@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
-# コンパクト実測行列（2026-08-08）— 全4観点を短時間で
+# コンパクト実測行列（2026-08-08 中立ベースラインで再登録）— 全4観点を短時間で
 #
-# 観点: ①素AI比較（compare: generate vs elevate） ②複数エージェント（同事業で2体 vs 4体）
-#       ③ループ回数（improve: 統合版→改修草案→統合） ④分野のばらつき（事業/歌詞/科学）
+# 観点: ①素AI比較（compare: generate vs elevate、ベースラインは中立化済み）
+#       ②複数エージェント（同事業で2体 vs 4体） ③ループ回数（improve: 昇華版→改修草案→昇華）
+#       ④分野のばらつき（事業/歌詞/科学）
 #
 # 各ケース: --engine claude-code（安定経路）・--evaluate・最小コール数（エージェント最小）
 # compare は --runs 2 で統計（勝率・平均差）を measurement.md に集計し、
 # check_matrix_progress.py の事前登録打ち切り規則（累積勝率≤50% かつ平均差≤0）に供する。
+# 打ち切り判定は新設計の行列ドメイン（ledger-2agents ledger-4agents ml-hypothesis）のみ
+# 集計する（旧設計の knowledge-search 等を混ぜない）。
 #
 # 使い方:
 #   bash examples/run_compact_matrix.sh            # 全4ケースを順次実行
@@ -58,4 +61,4 @@ run_compare 4 ml-hypothesis \
 
 echo "[$(ts)] === 全サンプル完了 ===" | tee -a "$LOG"
 echo "" | tee -a "$LOG"
-$PY examples/check_matrix_progress.py | tee -a "$LOG"
+$PY examples/check_matrix_progress.py --domains ledger-2agents ledger-4agents ml-hypothesis | tee -a "$LOG"
