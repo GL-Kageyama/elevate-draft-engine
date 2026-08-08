@@ -15,7 +15,7 @@
               │
               ↓
        [Reconcile: 矛盾解決推理]   ← エージェント間の衝突を検出し、一段高い位置から解決する
-              │                     （掛け算の発生点。読者向けではない思考の土台）
+              │                     （思考の土台。読者向けではない）
               ↓
        [Finalize: 最終化]          ← 解決済み推理だけを読み、明瞭な最終分析に仕上げる
               │
@@ -24,7 +24,7 @@
 
 肝は「複数の全く異なった draft を統合する」こと。草案生成（diverge）は前段に過ぎず、
 核心価値は synthesize（矛盾解決推理 → 最終化）にある。各エージェントは「より良いものを
-作る」クリエイター目線で統一され、エージェント同士の生産的衝突が統合時の掛け算の源泉になる。
+作る」クリエイター目線で統一され、エージェント同士の生産的衝突が統合解の源泉になる。
 
 エージェントは**1エージェント=1ファイル**方式（frontmatter + ペルソナ本文）で
 agents/{name}.md に配置する。正本はファイル。
@@ -37,7 +37,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Callable, Protocol
 
 # ---- 素の生成（単発） ----
 ANALYSIS_SYSTEM = (
@@ -82,6 +82,21 @@ def load_agents(agents_dir: str | Path | None = None) -> dict[str, str]:
         if body:
             result[name] = body
     return result
+
+
+def _strip_strong_claim(prompt: str) -> str:
+    """エージェントプロンプトから「最強の主張」断言枠を除去する（アブレーション用）。
+
+    「草案の作り方」の「枠を埋める」ステップと、末尾の「## 最強の主張」セクションを除去する。
+    reconcile は草案本文全体からも最強の主張を拾えるため、枠が無くても統合は機能する
+    （枠は「確実に拾うための定型」であり、必須ではない）。枠あり/なしの統合品質差を
+    測定したい場合（--no-strong-claim など）に使う。
+    """
+    # 1) 「草案の作り方」内の「枠を埋める」ステップ（数字付き箇条 + 1行の説明）を除去
+    text = re.sub(r"(?m)^\d+\. \*\*枠を埋める\*\*:.*\n", "", prompt)
+    # 2) 「## 最強の主張」セクション（末尾まで）を除去
+    text = re.sub(r"\n## 最強の主張\n.*", "", text, flags=re.DOTALL)
+    return text.rstrip()
 
 
 # ---- 単発統合（method="single-pass"） ----
@@ -162,9 +177,20 @@ RECONCILIATION_MIN_LENGTH = 30
 
 
 class Generator(Protocol):
-    """生成系 Claude のインターフェイス。temperature はエージェント草案の多様性確保に使う。"""
+    """生成系 Claude のインターフェイス。temperature はエージェント草案の多様性確保に使う。
 
-    def generate(self, system: str, user: str, *, temperature: float | None = None) -> str: ...
+    on_chunk はストリーム追記用のコールバック（草案の逐次保存）。実装が未対応でも
+    省略すれば呼ばれないため、既存クライアントはそのまま動く。
+    """
+
+    def generate(
+        self,
+        system: str,
+        user: str,
+        *,
+        temperature: float | None = None,
+        on_chunk: Callable[[str], None] | None = None,
+    ) -> str: ...
 
 
 @dataclass(frozen=True)
@@ -210,6 +236,7 @@ def _generate_with_completeness_guard(
     temperature: float | None = None,
     label: str = "統合生成",
     is_complete=None,
+    sink: Path | None = None,
 ) -> str:
     """指定 system で生成し、完全性ガード（broken output → regenerate）を適用する。
 
@@ -217,12 +244,31 @@ def _generate_with_completeness_guard(
     上限回数で直らない場合は明示的失敗（不完全出力を評価に渡さない）。
     temperature を渡すことで、推理は温度0.7、最終化は0.0を実現する。
     is_complete を渡すと判定を差し替えられる（最終化=文終端 / 推理=長さ下限）。
+
+    sink が与えられたら、生成前に空ファイルを作り、on_chunk 経由で届く文字列を
+    逐次追記する（草案のストリーム保存）。打ち切りで再生成するときはファイルを
+    空に戻してから再開するため、失敗試行の部分文がファイルに残らない。
     """
     if is_complete is None:
         is_complete = _synthesis_is_complete
     last_err = ""
     for _ in range(SYNTHESIS_MAX_ATTEMPTS):
-        artifact = generator.generate(system=system, user=user, temperature=temperature)
+        kwargs = {"system": system, "user": user, "temperature": temperature}
+        handle = None
+        if sink is not None:
+            sink.parent.mkdir(parents=True, exist_ok=True)
+            handle = open(sink, "w", encoding="utf-8")  # 生成前に空ファイルを作る
+
+            def on_chunk(delta: str, handle=handle) -> None:
+                handle.write(delta)
+                handle.flush()
+
+            kwargs["on_chunk"] = on_chunk
+        try:
+            artifact = generator.generate(**kwargs)
+        finally:
+            if handle is not None:
+                handle.close()
         if is_complete(artifact):
             return artifact
         last_err = f"{label}が打ち切られた/不完全（…{artifact[-20:]!r}）"
@@ -257,14 +303,17 @@ def _generate_finalize(generator: Generator, finalize_user: str) -> str:
     )
 
 
-def _generate_draft(generator: Generator, system: str, user: str, *, temperature: float) -> str:
+def _generate_draft(
+    generator: Generator, system: str, user: str, *, temperature: float, sink: Path | None = None
+) -> str:
     """エージェント草案を生成する。文途中の打ち切りは再生成。温度は draft_temperature。
 
     推理・最終化と同じ完全性ガード（broken output → regenerate）を草案にも適用する。
+    sink が与えられたら、生成前に空ファイルを作り、生成中に逐次追記する。
     """
     return _generate_with_completeness_guard(
         generator, system, user, temperature=temperature, label="草案生成",
-        is_complete=_draft_is_complete,
+        is_complete=_draft_is_complete, sink=sink,
     )
 
 
@@ -325,6 +374,7 @@ class DraftEngine:
         draft_temperature: float = DRAFT_TEMPERATURE,
         agents_dir: str | Path | None = None,
         agents: dict[str, str] | None = None,
+        strong_claim_frame: bool = True,
     ):
         self.client = client
         self.draft_temperature = draft_temperature
@@ -332,6 +382,10 @@ class DraftEngine:
             self._agents: dict[str, str] = dict(agents)
         else:
             self._agents = load_agents(agents_dir)
+        # 断言枠アブレーション: strong_claim_frame=False のとき「最強の主張」枠を除去する
+        # （枠あり/なしの統合品質差を測定したいとき用。既定は枠あり = 従来動作）。
+        if not strong_claim_frame:
+            self._agents = {name: _strip_strong_claim(p) for name, p in self._agents.items()}
 
     # ---- 素の生成 ----
 
@@ -356,10 +410,23 @@ class DraftEngine:
 
     # ---- DIVERGE ----
 
-    def diverge(self, task: str, agents: list[str] | None = None) -> list[Draft]:
+    def diverge(
+        self,
+        task: str,
+        agents: list[str] | None = None,
+        on_draft=None,
+        draft_dir: Path | None = None,
+    ) -> list[Draft]:
         """指定エージェント（既定は登録済み全エージェント）で独立草案を生成する。
 
         役割多様性（エージェントごとの system）＋温度多様性（draft_temperature）で独立した草案を保証。
+        on_draft(draft) を渡すと、各草案の生成完了時点で逐次コールバックされる
+        （進捗表示に使う。全生成完了を待たないため、途中で失敗しても
+        生成済み分の草案を失わない）。
+
+        draft_dir を渡すと、各草案は生成前に空の draft_{name}.md として作成され、
+        生成中に逐次追記される（claude-code エンジンのストリーム対応クライアントで
+        実際に逐次追記される。未対応クライアントでは生成完了時に一括書き込み）。
         """
         names = agents if agents is not None else list(self._agents)
         unknown = [a for a in names if a not in self._agents]
@@ -367,10 +434,17 @@ class DraftEngine:
             raise ValueError(f"未登録のエージェント: {unknown}（登録済み: {list(self._agents)}）")
         drafts: list[Draft] = []
         for name in names:
+            sink = None
+            if draft_dir is not None:
+                sink = draft_dir / f"draft_{name}.md"
             content = _generate_draft(
-                self.client, self._agents[name], task, temperature=self.draft_temperature
+                self.client, self._agents[name], task,
+                temperature=self.draft_temperature, sink=sink,
             )
-            drafts.append(Draft(agent=name, content=content))
+            draft = Draft(agent=name, content=content)
+            drafts.append(draft)
+            if on_draft is not None:
+                on_draft(draft)
         return drafts
 
     # ---- SYNTHESIZE（核心） ----

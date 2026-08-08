@@ -5,6 +5,7 @@ dev 検証で実ゲートウェイが空文字を返し、空成果物のまま�
 （35%が overall 0.1）。空応答は API 例外と同様に再試行し、最大回数後に失敗にする。
 """
 
+import json
 import sys
 from pathlib import Path
 
@@ -13,6 +14,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from adapters.claude_client import ClaudeClient, ClaudeConfig  # noqa: E402
+from adapters.claude_code_client import ClaudeCodeClient  # noqa: E402
 
 
 class FakeResponse:
@@ -150,3 +152,90 @@ def test_throttle_disabled_when_zero():
     client.generate(system="s", user="u")
     assert len(times) == 2
     assert times[1] - times[0] < 0.1
+
+
+# ---- ClaudeCodeClient のストリーム解析（claude -p --output-format stream-json） ----
+
+class _FakePopen:
+    """subprocess.Popen の代役。lines を stdout として返し、returncode を保持する。"""
+
+    def __init__(self, lines: list[str], returncode: int = 0):
+        self.lines = lines
+        self.returncode = returncode
+        self.calls = 0
+
+    def __call__(self, cmd: list[str], **kwargs):
+        self.calls += 1
+        self.cmd = cmd
+        self.stdout = iter(self.lines)
+        self.stderr = type("_Stderr", (), {"read": lambda self: ""})()
+        return self
+
+    def wait(self, timeout: float | None = None) -> int:
+        return self.returncode
+
+    def kill(self) -> None:
+        self.returncode = -9
+
+
+def _stream_jsonl(events: list[dict]) -> list[str]:
+    """stream-json の改行区切り JSON を組み立てる。"""
+    return [json.dumps(e, ensure_ascii=False) for e in events]
+
+
+def test_claude_code_stream_extracts_cumulative_text_deltas(monkeypatch):
+    """assistant イベントの累積テキストから差分を取り出し、on_chunk に逐次流す。
+
+    system/init・thinking ブロック・result イベントは読み飛ばし、text ブロックの
+    累積テキスト（前回分との差分）だけを返す。全文は最後の累積値に一致する。
+    """
+    import adapters.claude_code_client as mod
+
+    events = _stream_jsonl([
+        {"type": "system", "subtype": "init", "content": "diagnostics"},
+        {"type": "assistant", "message": {"content": [
+            {"type": "thinking", "text": "考え中のノート"},
+            {"type": "text", "text": "前半の"},
+        ]}},
+        {"type": "assistant", "message": {"content": [
+            {"type": "thinking", "text": "考え中のノート"},
+            {"type": "text", "text": "前半の後半である。"},
+        ]}},
+        {"type": "result", "subtype": "success", "result": "前半の後半である。"},
+        "これはJSON文字列だがオブジェクトではない",
+        "これは完全な非JSON行 {",
+    ])
+    fake = _FakePopen(events)
+    monkeypatch.setattr(mod.subprocess, "Popen", fake)
+    client = mod.ClaudeCodeClient()
+
+    deltas: list[str] = []
+    text = client._run_stream("prompt", "system", on_chunk=deltas.append)
+
+    assert text == "前半の後半である。"
+    assert deltas == ["前半の", "後半である。"]
+
+
+def test_claude_code_stream_empty_output_is_retried_then_fails(monkeypatch):
+    """全文が届かない空出力（exit 0）は再試行され、直らなければ明示的に失敗する。"""
+    import adapters.claude_code_client as mod
+
+    fake = _FakePopen([], returncode=0)
+    monkeypatch.setattr(mod.subprocess, "Popen", fake)
+    client = mod.ClaudeCodeClient(max_retries=3)
+
+    with pytest.raises(RuntimeError, match="Claude API 呼び出しに失敗"):
+        client.generate(system="s", user="u")
+    assert fake.calls == 3  # 空応答は再試行される（broken output → regenerate）
+
+
+def test_claude_code_stream_nonzero_exit_without_text_raises(monkeypatch):
+    """部分テキストが無いまま異常終了（exit≠0）なら RuntimeError（再試行可能）。"""
+    import adapters.claude_code_client as mod
+
+    fake = _FakePopen([], returncode=1)
+    monkeypatch.setattr(mod.subprocess, "Popen", fake)
+    client = mod.ClaudeCodeClient(max_retries=1)
+
+    with pytest.raises(RuntimeError, match="claude -p が空応答/異常終了"):
+        client.generate(system="s", user="u")

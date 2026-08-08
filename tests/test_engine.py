@@ -22,6 +22,7 @@ from elevate.engine import (  # noqa: E402
     RECONCILIATION_SYSTEM,
     SYNTHESIS_SYSTEM,
     SYNTHESIS_MAX_ATTEMPTS,
+    _strip_strong_claim,
     load_agents,
 )
 
@@ -51,7 +52,7 @@ class MockGenerator:
             return (
                 "草案間の対立は「価値の最大化と実現性の担保」という軸に集約される。"
                 "解決仮説として、最小単位で制度に埋め込み、実証データで価値の主張を強化する。"
-                "この統合を経て、単一観点では見えなかった第3の位置が得られる。"
+                "この統合は単一観点の草案にはない解を構成する。"
             )
         return (
             "完全な分析である。Target は明確、Value は実現可能、Risk は具体的な対策つき、"
@@ -165,6 +166,53 @@ def test_agents_override_param() -> None:
     assert engine.list_agents() == ["custom"]
 
 
+# ---- 断言枠アブレーション（strong_claim_frame） ----
+
+def test_strip_strong_claim_removes_frame_from_all_agents() -> None:
+    """_strip_strong_claim は全エージェントから「最強の主張」枠と「枠を埋める」ステップを除去する。"""
+    agents = load_agents()
+    for name, prompt in agents.items():
+        stripped = _strip_strong_claim(prompt)
+        assert "最強の主張" not in stripped, f"{name}: 最強の主張が残存"
+        assert "枠を埋める" not in stripped, f"{name}: 枠を埋めるが残存"
+        assert len(stripped) < len(prompt), f"{name}: 短くなっていない"
+        assert "You are the" in stripped, f"{name}: ペルソナ本文が失われている"
+
+
+def test_strip_strong_claim_keeps_core_persona() -> None:
+    """枠除去はペルソナ（本文・草案の作り方の指示）を壊さない。"""
+    prompt = load_agents()["strategist"]
+    stripped = _strip_strong_claim(prompt)
+    assert "You are the **Strategist**" in stripped
+    assert "草案の作り方" in stripped
+    assert "需要を特定する" in stripped  # 実質的な指示ステップは残る
+
+
+def test_draftengine_no_strong_claim_strips_agents() -> None:
+    """strong_claim_frame=False でエージェントプロンプトから枠が除去される。"""
+    engine = DraftEngine(MockGenerator(), strong_claim_frame=False)
+    assert len(engine.list_agents()) == len(DEFAULT_AGENTS)
+    for name in engine.list_agents():
+        assert "最強の主張" not in engine._agents[name]
+        assert "枠を埋める" not in engine._agents[name]
+
+
+def test_draftengine_strong_claim_default_keeps_frame() -> None:
+    """既定（strong_claim_frame=True）は枠を維持する（従来動作）。"""
+    engine = DraftEngine(MockGenerator())
+    assert "最強の主張" in engine._agents["strategist"]
+
+
+def test_diverge_without_strong_claim_passes_stripped_prompt() -> None:
+    """枠なしで diverge すると、除去済みプロンプトが生成器に渡る。"""
+    client = MockGenerator()
+    engine = DraftEngine(client, strong_claim_frame=False)
+    engine.diverge("タスク", agents=["strategist"])
+    system = client.calls[0]["system"]
+    assert "最強の主張" not in system
+    assert "枠を埋める" not in system
+
+
 # ---- DIVERGE ----
 
 def test_diverge_generates_one_draft_per_agent() -> None:
@@ -188,6 +236,98 @@ def test_diverge_unknown_agent_raises() -> None:
     engine = DraftEngine(MockGenerator())
     with pytest.raises(ValueError, match="未登録のエージェント"):
         engine.diverge("タスク", agents=["ghost"])
+
+
+def test_diverge_on_draft_fires_per_generated_draft() -> None:
+    """on_draft は各草案の生成完了時点で逐次呼ばれる（全完了を待たない）。"""
+    client = MockGenerator()
+    engine = DraftEngine(client)
+    seen: list[str] = []
+    drafts = engine.diverge(
+        "タスク", agents=["strategist", "humanist"], on_draft=lambda d: seen.append(d.agent)
+    )
+    # 生成順に逐次通知され、戻り値の草案と同一内容を持つ
+    assert seen == ["strategist", "humanist"]
+    assert [d.agent for d in drafts] == seen
+
+
+# ---- ストリーム草案保存（draft_dir: 空ファイル先作成 + 逐次追記） ----
+
+class _StreamingMockGenerator:
+    """on_chunk でチャンク列を逐次に流すモック（ストリーム草案保存の検証用）。
+
+    n_broken で最初の n 回を「途中で打ち切られた不完全文」にする（完全性ガードの
+    再生成と、失敗試行のファイルリセットを検証するため）。
+    """
+
+    def __init__(self, chunks: list[str], *, n_broken: int = 0) -> None:
+        self.chunks = chunks
+        self.n_broken = n_broken
+        self.calls = 0
+        self.file_state_at_first_chunk: tuple[bool, int] | None = None
+        self.first_chunk_sink = None  # 最初の on_chunk 時のファイル状態を調べるための注入点
+
+    def generate(
+        self,
+        system: str,
+        user: str,
+        *,
+        temperature: float | None = None,
+        on_chunk=None,
+    ) -> str:
+        self.calls += 1
+        if self.calls <= self.n_broken:
+            partial = self.chunks[0][:-1]  # 終端記号を欠いた不完全文
+            if on_chunk is not None:
+                on_chunk(partial)
+            return partial
+        full = "".join(self.chunks)
+        for c in self.chunks:
+            if on_chunk is not None:
+                if self.file_state_at_first_chunk is None and self.first_chunk_sink is not None:
+                    path = self.first_chunk_sink
+                    self.file_state_at_first_chunk = (path.exists(), path.stat().st_size)
+                on_chunk(c)
+        return full
+
+
+def test_diverge_draft_dir_writes_streamed_draft(tmp_path) -> None:
+    """draft_dir 指定時、草案ファイルが生成内容と一致して保存される（on_chunk 経由）。"""
+    client = _StreamingMockGenerator(["完全な", "草案", "である。"])
+    engine = DraftEngine(client)
+    drafts = engine.diverge("タスク", agents=["strategist"], draft_dir=tmp_path)
+    assert drafts[0].content == "完全な草案である。"
+    assert (tmp_path / "draft_strategist.md").read_text() == "完全な草案である。"
+
+
+def test_diverge_draft_dir_creates_empty_file_before_generation(tmp_path) -> None:
+    """空ファイルが生成開始（最初のチャンク到着）時点で既に存在し、中身が空である。
+
+    ユーザー要望「草案作成時にまず空ファイルを作って、そこに逐次追記していく」の検証。
+    """
+    client = _StreamingMockGenerator(["完全な", "草案", "である。"])
+    client.first_chunk_sink = tmp_path / "draft_strategist.md"
+    engine = DraftEngine(client)
+    engine.diverge("タスク", agents=["strategist"], draft_dir=tmp_path)
+    assert client.file_state_at_first_chunk is not None
+    exists, size = client.file_state_at_first_chunk
+    assert exists is True  # 生成開始時点でファイルが既に作られている
+    assert size == 0       # まだ空（これから追記される）
+
+
+def test_diverge_draft_dir_truncates_on_regeneration(tmp_path) -> None:
+    """打ち切りで再生成したとき、ファイルは失敗試行の部分文を残さない。
+
+    失敗試行が書いた内容を空に戻してから再生成する（部分文 + 全文の重複を防ぐ）。
+    """
+    client = _StreamingMockGenerator(["完全な草案である。"], n_broken=1)
+    engine = DraftEngine(client)
+    drafts = engine.diverge("タスク", agents=["strategist"], draft_dir=tmp_path)
+    assert client.calls == 2  # 失敗→再生成
+    assert drafts[0].content == "完全な草案である。"
+    path = tmp_path / "draft_strategist.md"
+    # ファイルは成功試行の全文だけを持つ（失敗試行の部分文が残らない）
+    assert path.read_text() == "完全な草案である。"
 
 
 # ---- SYNTHESIZE（核心） ----

@@ -18,7 +18,7 @@ AIが一発で出す「平均的な良い答え」を超えるために、**DIVE
                       │
                       ↓
              [矛盾解決推理 Reconcile]     ← エージェント同士の衝突を検出し、一段高い位置から解決
-                      │                    （掛け算の発生点。読者向けではない思考の土台）
+                      │                    （思考の土台。読者向けではない）
                       ↓
              [最終化 Finalize]           ← 解決済み推理だけを読み、単発生成を上回る明瞭な成果物に仕上げる
                       │
@@ -27,9 +27,10 @@ AIが一発で出す「平均的な良い答え」を超えるために、**DIVE
 ```
 
 - **DIVERGE**: 8種のクリエイターエージェント × 温度 0.7 で独立草案を生成。役割多様性（system）＋温度多様性で独立を保証。
-- **SYNTHESIZE**（核心）: 全草案を読み、エージェント間の矛盾を解決する推理（temp 0.7）→ 解決済み推理だけを読む最終化（temp 0.0）。**どの草案にも無い第3の位置**を生む「掛け算」。
-  - 例えば strategist の「収益」× humanist の「共感」の衝突は、単独のエージェントでは見えない統合解に収束する。
-  - `synthesize()` は**外部草案も受け付ける**。人間の専門家が書いた分析、別モデルの出力、過去の成果物など、出所を問わず「複数の異なる視点」を突っ込めば一段高い統合を返す。
+- **SYNTHESIZE**（核心）: 全草案を読み、エージェント間の矛盾を解決する推理（temp 0.7）→ 解決済み推理だけを読む最終化（temp 0.0）。単一観点の草案にはない解を構成する。
+  - 例えば strategist の「収益」と humanist の「共感」の衝突は、単一エージェントが個別に出す草案とは異なる統合解に構成される。
+  - 「統合が単発生成を上回る」は**設計目標であり、未実証の命題**である。実測による証明の経路は [統合優位性の計測](#統合優位性の計測compare) を参照。
+  - `synthesize()` は**外部草案も受け付ける**。人間の専門家が書いた分析、別モデルの出力、過去の成果物など、出所を問わず「複数の異なる視点」を突っ込めば統合解を返す。
 
 ## エージェント（agents/）
 
@@ -57,7 +58,7 @@ You are the **Strategist**, a voice of value and markets.
 先読みさせると自由な論述が萎縮するため、反論の検出は統合段階の reconciler が引き受ける。
 
 デフォルト8エージェントは全クリエイター目線で統一されており、エージェント同士の
-**生産的衝突**が統合時の掛け算の源泉になる。懐疑・批判は統合段階の reconciler が
+**生産的衝突**が統合解の源泉になる。懐疑・批判は統合段階の reconciler が
 引き受ける（草案同士の矛盾を検出して解決する）。
 
 エージェントは `./install.sh` で Claude Code のサブエージェント（Agent tool / @-mention）
@@ -79,7 +80,7 @@ You are the **Strategist**, a voice of value and markets.
 
 ```bash
 python -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/python -m pytest tests/ -q     # 44件
+.venv/bin/python -m pytest tests/ -q     # 69件
 
 # API 不要のモックでパイプライン確認
 .venv/bin/python main.py compare "健康AIの企画" --mock --evaluate
@@ -107,11 +108,53 @@ python main.py synthesize draft1.md draft2.md  # 外部草案を統合（核心�
 python main.py elevate "タスク"                  # diverge → synthesize 一気
 python main.py compare "タスク"                  # generate vs elevate 両方出力
 python main.py compare "タスク" --evaluate       # + 5軸評価でスコア比較
+python main.py compare "タスク" --evaluate --runs 10        # N回反復で統計集計
+python main.py compare "タスク" --evaluate --baseline best-of-n  # 帰無仮説比較
+python main.py compare "タスク" --evaluate --no-strong-claim      # 断言枠アブレーション
 ```
 
 共通オプション: `--mock`（API不要）/ `--engine sdk|claude-code`（既定 sdk）/
 `--method two-stage|single-pass`（既定 two-stage）/
-`--agents strategist humanist`（エージェントを限定）/ `--out DIR`（成果物保存）
+`--agents strategist humanist`（エージェントを限定）/ `--out DIR`（成果物の保存先。省略時は
+`outputs/{タスク名}/` に自動保存。diverge / elevate / compare すべて全成果物を対象）/
+`--runs N`（compare を N 回反復）/ `--baseline single|best-of-n`（比較対象）/
+`--no-strong-claim`（断言枠除去）
+
+### 統合優位性の計測（compare）
+
+このエンジンの存在理由は「統合が単発生成（または統合しない最良草案選択）を上回るか」という
+**実測でしか証明できない命題**である。`compare` はその計測装置を備える。
+
+| オプション | 動作 |
+|---|---|
+| `--runs N` | 比較を N 回反復し、平均 overall・標準偏差・勝率（ELEVATE > ベースライン）を出力。既定 1 |
+| `--baseline single` | ベースライン = 素の単発生成（`generate`）。既定 |
+| `--baseline best-of-n` | ベースライン = **統合しない最良草案選択**（帰無仮説）。同一の8草案から統合せず最高スコアの草案を選ぶ場合と、統合する場合を同一評価器で測る。`--evaluate` 必須 |
+| `--no-strong-claim` | エージェントから「最強の主張」断言枠を除去。枠あり/なしの統合品質差を測定するアブレーション |
+
+```bash
+# 実測（2026-08-08, タスク: 社内ナレッジ検索ツールの設計, 8エージェント, claude-code, n=1）
+[素の生成（単発）] overall=0.758（Pass）  quality 0.85 / logic 0.80 / creativity 0.85 / value 0.80 / risk 0.85
+[ELEVATE]           overall=0.755（Pass）  quality 0.85 / logic 0.75 / creativity 0.95 / value 0.75 / risk 0.85
+差（ELEVATE−素の生成）: -0.003（n=1）
+```
+
+`--runs N`（N>1）を渡すと、各 run のスコアを集計して以下を出力する:
+
+```bash
+=== 比較集計 ===
+素の生成（単発）: mean=0.778 sd=0.012（n=3）
+ELEVATE:            mean=0.812 sd=0.009（n=3）
+差（ELEVATE−ベースライン）: mean=0.034 sd=0.015（n=3）
+勝率（ELEVATE > ベースライン）: 3/3 = 100.0%
+```
+
+（上段は**実測の一例**。下段は `--runs 3` の集計フォーマットを示す形式例であり、値は実測ではない。）
+
+同一タスク・同一モデルでこの計測を多数回実行し、結果を examples/ に公開することが、
+本エンジンの存在理由を実証する経路である。勝率が 50% を下回るタスクが存在してもよい
+（その開示こそが誠実な主張になる）。実測の正体は examples/knowledge-search/ を参照
+（n=1 のため統計的な優位性は示せておらず、差はノイズの範囲内であることを明示する）。
 
 ### 生成エンジン（--engine）
 
@@ -172,6 +215,8 @@ engine.remove_agent("storyteller")
 
 # Step 1: DIVERGE — 独立草案を生成（既定は全エージェント）
 drafts = engine.diverge("健康AIの企画")
+# draft_dir を渡すと各草案を空ファイルから生成中に逐次追記（CLI は既定で outputs/{タスク名}/ を渡す）
+drafts = engine.diverge("健康AIの企画", draft_dir=Path("examples/health-ai"))
 
 # Step 2: SYNTHESIZE — 複数の異なる草案を統合（核心）
 elevated = engine.synthesize(drafts)     # 内部: reconcile → finalize
@@ -208,7 +253,7 @@ elevate-draft-engine/
 │   └── evaluator.py            # 5軸評価（自己完結。--evaluate 用）
 ├── skills/
 │   └── elevate-draft-engine/SKILL.md   # ファサード skill（main.py を起動。オーケストレーションは委譲）
-├── tests/                      # 44件（engine 28 / client 6 / evaluator 10）
+├── tests/                      # 69件（engine 37 / compare 13 / client 9 / evaluator 10）
 ├── examples/                   # 実行サンプル集（input + 各草案 + 成果物）
 ├── install.sh                  # agents + skill を Claude Code 検出先へ symlink 設置
 ├── main.py                     # 薄い CLI
@@ -218,5 +263,20 @@ elevate-draft-engine/
 
 設計の要点（詳細はコードのコメント参照）:
 - **完全性ガード（broken output → regenerate）**: 打ち切り/不完全は再生成（最大3回）、直らなければ明示的失敗
+- **成果物のファイル逐次保存（既定）**: `--out` を省略すると `outputs/{タスク名}/` に全成果物（input / draft_{agent} / reconciliation / raw / elevated / evaluation_* / measurement）を自動保存する。draft は生成前に空の `draft_{agent}.md` として作られ、生成中に逐次追記される。全8草案の完了を待たずにファイルが育つため、途中で失敗しても生成済み分は消えない。打ち切りで再生成するときはファイルを空に戻してから再開する。claude-code エンジンは `claude -p --output-format stream-json` の累積テキスト差分を `on_chunk` で流す（SDK エンジンは全文が揃った時点で一括書き込み）
 - **推理の完全性は長さ基準**（最小30字）: 推理は「思考の土台」で文終端記号で終わらないため
 - **最終化は解決済み推理だけを読み**、中間思考（草案同士の比較）が成果物に漏れない
+
+## 制約と失敗モード
+
+- **統合優位性は保証されない**: 「統合が単発生成を上回る」は設計目標であり**未実証の命題**。
+  タスクやモデルによっては統合がベースラインを下回る。`compare --runs N` の実測データが唯一の
+  根拠であり、勝率 50% を下回る結果も正常な知見として開示する。
+- **コスト**: DIVERGE（8草案）+ reconcile + finalize は単発生成の約10回分の API 呼び出しになる。
+  優位性の検証はそのコストに見合うタスクに限るのが実用的である。
+- **温度近似**: `claude-code` エンジンでは温度をシステムプロンプトの指示文で近似する
+  （SDK 直呼びの空応答回避のため）。数値としての温度再現性はない。
+- **評価の系統**: `--evaluate` の評価は生成と独立した評価エンジン（evaluation/）で行うが、
+  評価モデルが生成モデルと同系である限り、完全な独立評価ではない。結果は傾向として読む。
+- **アブレーションの範囲**: `--no-strong-claim` は枠の有無だけを変える。枠の貢献度が正にも負にも
+  出る可能性があり、どちらの結果もそのまま報告する。

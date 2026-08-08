@@ -93,13 +93,27 @@ class ClaudeClient:
             max_retries=max_retries,
         )
 
-    def generate(self, system: str, user: str, *, temperature: float | None = None) -> str:
+    def generate(
+        self,
+        system: str,
+        user: str,
+        *,
+        temperature: float | None = None,
+        on_chunk=None,
+    ) -> str:
         """生成系モデルで呼び出す（Skill: Analysis 用）。
 
         temperature は per-call で上書き可能（草案生成（diverge）で多様性を
         確保するために 0.7 を渡す。省略時は config の既定温度）。
+
+        on_chunk はストリーム追記用コールバック。SDK 経路では応答を逐次ストリーム
+        しないため、全文が揃った時点で 1 回だけ呼ぶ（草案の逐次保存は実現するが、
+        生成中の追記は claude-code エンジンのみが行う）。
         """
-        return self._call(self.config.generation_model, system, user, temperature=temperature)
+        text = self._call(self.config.generation_model, system, user, temperature=temperature)
+        if on_chunk is not None:
+            on_chunk(text)
+        return text
 
     def evaluate(self, system: str, user: str) -> str:
         """評価系モデルで呼び出す（Evaluation Engine 用）。"""
