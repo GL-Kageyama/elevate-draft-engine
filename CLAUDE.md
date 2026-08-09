@@ -15,6 +15,8 @@ README / SKILL / examples/README には**現在の情報**だけを書く。現�
 - `HISTORY.md`: 開発史（バージョン履歴、ルーブリック再調整の経緯、実測記録、知恵の評議会評価）
 - `examples/README.md`: 現在のサンプル構成と使い方（過去の削除済みサンプルは載せない）
 - `skills/elevate-draft-engine/SKILL.md`: ファサード skill（version番号は現在値のみ、バージョン履歴テーブルは HISTORY.md）
+- `.claude/agents/`・`.claude/skills/`: プロジェクト内検出用symlink（root `agents/`・`skills/` への相対リンク。エンジン本体は `agents/*.md` を直接読むためインストール不要）
+- `.claude-plugin/`: プラグイン配布定義（`/plugin marketplace add` 用）。`install.sh` は従来のグローバル/ローカル symlink 方式
 
 ## ポリシー固定（触らないもの）
 

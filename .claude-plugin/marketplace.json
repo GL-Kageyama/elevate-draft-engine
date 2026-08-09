@@ -1,0 +1,45 @@
+{
+  "name": "elevate-draft-engine",
+  "owner": {
+    "name": "GL-Kageyama"
+  },
+  "metadata": {
+    "description": "Dialectical sublation (Aufheben) engine — 8 diverse creator agents draft independently, then three-moment sublation distills them into a single elevated artifact."
+  },
+  "plugins": [
+    {
+      "name": "elevate-draft-engine",
+      "source": "./",
+      "description": "Elevate Draft Engine — a dialectical engine that turns maximally-divergent drafts into one elevated artifact that beats any single point of view. 8 creator agents (strategist, humanist, storyteller, futurist, designer, visionary, implementer, differentiator) draft independently, then Aufheben (negate / preserve / elevate) sublates them. Supports elevate, improve (iterative refinement with quality ceiling), and compare (measured against single-shot generation) with a 5-axis rubric.",
+      "version": "2.3.0",
+      "author": {
+        "name": "GL-Kageyama"
+      },
+      "license": "MIT",
+      "keywords": [
+        "claude-code",
+        "ai",
+        "multi-agent",
+        "aufheben",
+        "sublation",
+        "draft",
+        "pipeline",
+        "skills",
+        "agents",
+        "evaluation",
+        "elevate"
+      ],
+      "category": "workflow",
+      "tags": [
+        "multi-agent",
+        "aufheben",
+        "draft",
+        "pipeline",
+        "skills",
+        "agents",
+        "elevation"
+      ],
+      "strict": false
+    }
+  ]
+}

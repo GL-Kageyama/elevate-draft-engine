@@ -1,0 +1,28 @@
+{
+  "name": "elevate-draft-engine",
+  "version": "2.3.0",
+  "description": "Dialectical sublation (Aufheben) engine — 8 diverse creator agents each draft independently, then the three-moment sublation (negate / preserve / elevate) distills them into a single artifact that outdoes any single point of view. Pipeline: elevate / improve（反復磨き）/ compare（昇華 vs 単発生成の実測）with a 5-axis rubric.",
+  "author": {
+    "name": "GL-Kageyama"
+  },
+  "license": "MIT",
+  "keywords": [
+    "claude-code",
+    "ai",
+    "multi-agent",
+    "aufheben",
+    "sublation",
+    "draft",
+    "pipeline",
+    "skills",
+    "agents",
+    "evaluation"
+  ],
+  "mcpServers": {},
+  "skills": [
+    "./skills/"
+  ],
+  "agents": [
+    "./agents/"
+  ]
+}
