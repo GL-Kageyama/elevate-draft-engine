@@ -49,7 +49,7 @@ Python エンジン側にある。**クリエイターエージェントをサ�
 | `rounds` | `3` | `improve` のみ: 昇華を繰り返す回数。round 2 以降は前回の昇華版を改修した草案を昇華 |
 | `evaluate` | `false` | `improve`: 各ラウンドの昇華版を5軸評価し、改善が頭打ちなら早期停止 / `compare`: スコア比較を有効化 |
 | `min_improve` | `0.01` | `improve --evaluate` の早期停止しきい値。直前ラウンドからの overall 改善がこれ未満なら停止（頭打ち。過修正を避ける） |
-| `quality_ceiling` | `0.85` | `improve --evaluate` の高品位停止しきい値。昇華版の overall がこれ以上なら改修ラウンドを生成せず停止（既に高品位な成果物は改修で壊れやすいため。実測: story-plot 0.860→0.520） |
+| `quality_ceiling` | `0.85` | `improve --evaluate` の高品位停止しきい値。昇華版の overall がこれ以上なら改修ラウンドを生成せず停止（既に高品位な成果物ほど改修で壊れやすいため） |
 | `runs` | `1` | `compare` のみ: 比較を N 回反復し統計集計（平均・勝率・標準偏差・95%CI）を出力 |
 | `baseline` | `single` | `compare` のみ: `single`（素の単発生成）/ `best-of-n`（昇華しない最良草案選択＝帰無仮説） |
 | `output_format` | 動的抽出 | OutputFormat の JSON を明示指定（LLM 抽出をスキップ。mock でも有効）。省略時は実APIでタスクから LLM が動的に抽出（キャッチコピー・歌詞・事業計画など分野ごとの形式） |
@@ -87,7 +87,7 @@ cd "$ENGINE_REPO"
   --out "$SAVE_DIR"
 ```
 
-- `main.py` が保存する一式は**種類ごとのフォルダに分類**される（2026-08-09 ユーザー指示）:
+- `main.py` が保存する一式は**種類ごとのフォルダに分類**される:
   `input.md`（タスク）は `--out` 直下、`knowledge.md`（前提知識。指定時のみ）も `--out` 直下（input/format と並列）、
   `draft_{agent}.md` は `drafts/`、
   `reconciliation.md`（昇華の下地）/ `elevated.md` / `raw.md` は `artifacts/`、
@@ -97,16 +97,14 @@ cd "$ENGINE_REPO"
   完全な分析レポートではなく、後の昇華に渡す先鋭化した1つのテーゼ。
   ただし**創作系タスク**（歌詞/小説/物語/詩/キャッチコピー等、`_is_creative_task` のキーワード判定）
   は完成作品が長くなりうるため上限を `DRAFT_MAX_LENGTH_CREATIVE`=3000に緩める
-  （実測 2026-08-09: 歌詞1116字が1000字上限で3回失敗し行列が落ちた）
-- **出力フォーマット認識**（2026-08-09）: 実API時はパイプライン開始前にタスクから
+- **出力フォーマット認識**: 実API時はパイプライン開始前にタスクから
   **期待される出力形式を LLM が動的に抽出**する（`extract_format`。1回の軽量コール。
   抽出結果は `--out/format.md` に保存）。抽出した `OutputFormat` を全段階に注入——
   エージェント草案には `draft_guidance`（タスク固有の草案形式）を追記、最終化は
   `finalize_guidance` で汎用の TVRO を置換、完全性ガードはタスク固有の
-  `{min,max}_output_length` で判定（5字のタグラインが固定下限300で再生成される
-  「キャッチコピー→分析レポート化」問題の根本対処）。`--output-format '<JSON>'` で
-  明示指定もできる（抽出をスキップ。mock でも有効）。抽出失敗は既存挙動
-  （分析レポート前提）にフォールバックする。抽出した仕様が自己矛盾（要求構造 >
+  `{min,max}_output_length` で判定（短い成果物（タグライン等）はタスク固有の下限で判定）。
+  `--output-format '<JSON>'` で明示指定もできる（抽出をスキップ。mock でも有効）。
+  抽出失敗は既存挙動（分析レポート前提）にフォールバックする。抽出した仕様が自己矛盾（要求構造 >
   max 等）で達成不能な場合は、上限回数後、構造的に完成した最後の試行を安全弁で受け入れる。
 - 最終成果物（`elevated.md`）にも**両方向のサイズ制約**（`ELEVATED_MIN_LENGTH`=300〜`ELEVATED_MAX_LENGTH`=1500）——
   結論なので小さすぎも、報告書化の過剰包摂も不合格で再生成
@@ -147,7 +145,7 @@ cd "$ENGINE_REPO"
 
 - **空応答・打ち切り**: エンジンが自動再試行する（`CLAUDE_MAX_RETRIES`、既定6）。手動でパッチしない。
 - **崩れた出力**: 手で直さない。`main.py` を再実行して再生成する（broken output → regenerate）。
-- **評価軸**: 5軸はポリシー密着（多様性 / 統合性 / 超越性 / 誠実性 / 実用性・均等重み 0.20）で決定済み。ゴールポストは固定（2026-08-08 再調整(3)。安易に変更しない。定義は README「評価の5軸」参照）。
+- **評価軸**: 5軸はポリシー密着（多様性 / 統合性 / 超越性 / 誠実性 / 実用性・均等重み 0.20）で固定。変更しない（定義は README「評価の5軸」参照）。
 
 ## 出力規約
 
@@ -200,15 +198,4 @@ Rules:
 - Do not change the evaluation axes (fixed: diversity / synthesis / elevation / honesty / utility, equal 0.20 weights — defined in README "評価の5軸").
 ```
 
-## Version History
-
-| Version | Date | Changes |
-|---------|------|---------|
-| 2.2.0 | 2026-08-09 | **前提知識の注入**を追加。`--knowledge 'TEXT'` / `--knowledge-file PATH` / `--ask-knowledge`（相互排他）で起動時に前提知識（素材・制約・背景）を指定。diverge（草案）・aufheben（止揚）・finalize（最終化）・generate（単発）の全生成段階にタスク直後として注入し、`--out/knowledge.md` に保存（input.md / format.md と並列）。fmt（形）と対になる内容の制約。extract_format / 5軸評価には注入しない。improve の改修ラウンドに永続・compare は公平（両経路に注入） |
-| 2.1.0 | 2026-08-09 | **出力フォーマット認識**を追加。実API時にタスクから期待される出力形式を LLM が動的に抽出（`extract_format`）し、diverge（草案形式）・finalize（TVRO置換）・完全性ガード（タスク固有の長さ範囲）に注入。キャッチコピーが分析レポートになる根本原因を解消。`--output-format '<JSON>'` で明示指定も可能（mock でも有効）。抽出失敗は既存挙動にフォールバック |
-| 2.0.1 | 2026-08-09 | `improve` に高品位停止を追加（`--quality-ceiling` 既定 0.85）。overall がしきい値以上なら改修ラウンドを生成せず停止（実測: story-plot 0.860→0.520 の過修正を防ぐ）。停止理由は progress.md に記録 |
-| 2.0.0 | 2026-08-08 | 中核機構を「論理的な統合（synthesis）」から「弁証法的昇華（Aufheben）」へ衣替え。DIVERGE は温度0.9で極限まで逸脱し、昇華推理が否定・保存・高次化の三契機で矛盾を包括する枠組みを創出する。DIVERGE → AUFHEBEN → FINALIZE の3段構え（用語変更ではなく機構変更） |
-| 1.3.0 | 2026-08-08 | 起動時にユーザーへリポジトリ全体の概要を改行・段落で簡潔に伝える手順を Procedure 冒頭に追加 |
-| 1.2.0 | 2026-08-08 | 評価軸をポリシー密着5軸（多様性/統合性/超越性/誠実性/実用性・均等0.20）に再設計（README「評価の5軸」参照）。Risk 軸廃止 |
-| 1.1.0 | 2026-08-08 | `improve`（統合版→改修草案→統合の反復）と `compare`（素の生成 vs 統合の実測）をファサードに追加 |
-| 1.0.0 | 2026-08-08 | Initial version（ファサード。オーケストレーションは main.py に委譲） |
+バージョン履歴はリポジトリの `HISTORY.md` に集約されている。
