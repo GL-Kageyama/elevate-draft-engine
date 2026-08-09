@@ -10,8 +10,9 @@ README / SKILL / examples/README には**現在の情報**だけを書く。現�
 変更した」「再調整(2)により…」のような導入経緯の物語が必要になったら、それは HISTORY.md に書く。
 
 **どこに何があるか**:
-- `README.md`: 現在の機能・CLI・API・5軸・リポジトリ構成（現在の情報のみ）
-- `HISTORY.md`: 開発史（バージョン履歴、ルーブリック再調整の経緯、旧実測記録、知恵の評議会評価）
+- `README.md`: 現在の機能・CLI・API・5軸・リポジトリ構成（概要。現在の情報のみ）
+- `docs/`: README の深掘り詳細（`output-format.md` 出力フォーマット認識 / `knowledge.md` 前提知識注入 / `measurement.md` compare・improve / `api.md` Python API）。README は各節に概要＋docs/ へのリンクを置く
+- `HISTORY.md`: 開発史（バージョン履歴、ルーブリック再調整の経緯、実測記録、知恵の評議会評価）
 - `examples/README.md`: 現在のサンプル構成と使い方（過去の削除済みサンプルは載せない）
 - `skills/elevate-draft-engine/SKILL.md`: ファサード skill（version番号は現在値のみ、バージョン履歴テーブルは HISTORY.md）
 

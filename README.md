@@ -33,14 +33,12 @@ AIが一発で出す「平均的な良い答え」を超えるために、**DIVE
 - **DIVERGE**: 8種のクリエイターエージェント × 温度 0.9 で、それぞれが**極限まで逸脱した**独立草案を生成。役割多様性（system）＋温度多様性で独立を保証。妥協や中間解は素材にならない——後の昇華で一段高い次元へ引き上げるための、あえて先鋭化した個別解を出す。
 - **SYNTHESIZE**（核心）: 全草案を読み、**否定・保存・高次化**の三契機で止揚する昇華推理（temp 0.9）→ 止揚推理だけを読む最終化（temp 0.0）。単一観点の草案にはない超越的な統合解を構成する。
   - 例えば strategist の「収益」と humanist の「共感」の衝突は、論理的な妥協（条件付き受容）ではなく、両者の真理を**同時に成立させる新たな枠組み**へ止揚される。
-  - 「昇華が単発生成を上回る」は**設計目標**。`compare` による実測で検証する（実測記録は [HISTORY.md](./HISTORY.md) に一元管理。n が小さいためタスク依存の逆転が起きる可能性は残る）。検証の経路は [昇華優位性の計測](#昇華優位性の計測compare) を参照。
+  - 「昇華が単発生成を上回る」は**設計目標**。`compare` による実測で検証する（[昇華優位性の計測](#昇華優位性の計測compare) を参照）。
   - `synthesize()` は**外部草案も受け付ける**。人間の専門家が書いた分析、別モデルの出力、過去の成果物など、出所を問わず「複数の異なる視点」を突っ込めば超越的な統合解を返す。
 
 ## 評価の5軸（ポリシー密着）
 
-`--evaluate` の採点は、**このエンジンが「良い成果物」だと信じていること**（ポリシー）を測る。
-
-> **複数の独立した視点を昇華して、単一視点を超える成果物を生む** —— このポリシーを5つの軸に分解し、それぞれ 0.0〜1.0 で採点する。
+`--evaluate` の採点は、**このエンジンが「良い成果物」だと信じていること**（ポリシー: 複数の独立した視点を昇華して単一視点を超える成果物を生む）を5つの軸に分解し、それぞれ 0.0〜1.0 で測る。
 
 最初の3軸は「発散 → 昇華 → 超越」というエンジンの動きの質を、残る2軸は成果物の仕上がりの質を測る。
 
@@ -77,7 +75,6 @@ overall の式（α = 0.25。`0.75` は `1−α`）:
     品質スコア = (新奇度 + 独自性 + 意外性) / 3
 
 - **定番回答は大幅に減点される**: 品質スコア 0.2（定番）なら係数 0.40、0.8（独自）なら係数 0.85。
-  実測では素の生成（定番）と昇華（独自）の overall 差が、5軸単独の 0.03 程度から 0.4 前後に拡大する。
 - **Pass しきい値は 0.60**: 品質評価の掛け算で overall の絶対値が下がるため、5軸単独時代の 0.70 から再調整。
 - **`--no-quality`** で品質評価なし（5軸のみの overall）に戻せる。
 
@@ -181,155 +178,26 @@ python main.py improve "タスク" --rounds 3 --evaluate             # + 各ラ�
 
 ### 出力フォーマット認識（分野ごとの形式）
 
-パイプライン開始前に、タスクから期待される出力形式を LLM が動的に抽出する
-（`extract_format`。1回の軽量コール、温度0.0、同一タスクはキャッシュ）。
-抽出した `OutputFormat` を全段階に注入する:
-
-```
-Task → extract_format(task) [1 lightweight LLM call] → OutputFormat
-                                                          │
-    ┌─────────────────────────────────────────────────────┼──────────────────────────┐
-    ↓                                                     ↓                          ↓
-diverge()                                           aufheben()                 finalize()
-・fmt.draft_guidance をタスクに追記                  ・deliverable_type を       ・fmt.finalize_guidance
-  （キャッチコピーなら「候補+意図」形式で）           意識させる指示を追記         で TVRO を置換
-・出力が成果物そのもの（output_is_direct）なら           （弁証法自体は不変）      ・fmt.{min,max}_output_length
-  草案上限を創作系上限に緩める                                                 で完全性判定
-```
-
-`OutputFormat`（[elevate/engine.py](elevate/engine.py)）:
-
-| フィールド | 意味 |
-|---|---|
-| `deliverable_type` | 成果物の種別名（例: キャッチコピー / 事業計画書 / 歌詞 / 小説） |
-| `description` | このタスクで良い成果物とは何か（1文） |
-| `draft_guidance` | エージェント草案の形式指示（分析系ならテーゼ形式、短形式なら候補+根拠） |
-| `finalize_guidance` | 最終化の形式指示（汎用 TVRO をタスク固有の構造で置換） |
-| `min_output_length` / `max_output_length` | 最終成果物の長さ範囲（タスク固有。タグライン min=2 / 小説 max=8000 等） |
-| `output_is_direct` | `true`=成果物そのもの（コピー・詩・歌詞） / `false`=成果物についての分析 |
-
-- **抽出失敗時は既存挙動（分析レポート前提・固定値）にフォールバック**する——劣化ではなく安全側への退避。
-  分析系タスクは LLM が TVRO 相当の `finalize_guidance` を返すため、既存と同一の挙動になる。
-- `--output-format '<JSON>'` で抽出をスキップして明示指定できる（mock でも有効。テスト・再現に使う）。
-- 抽出/指定された仕様は `--out/format.md` に保存される（透明性）。
-- 完全性ガードはタスク固有の長さ範囲で判定し、**直接成果物（output_is_direct）は文末記号を要求しない**
-  （タグラインや詩は「。」で終わらないのが普通。固定の文終端チェックを要求すると完成形を再生成ループに落とす）。
-- **仕様の自己矛盾は安全弁で吸収**: LLM 抽出のフォーマットが自己矛盾（抽出した `finalize_guidance` が
-  要求する構造 > 抽出した `max_output_length` 等）で実質達成不能なとき、上限回数の再生成後、
-  構造的に完成した（文終端のある）最後の試行を受け入れて続行する（警告を stderr に出す）。
-  健全な成果物を仕様不整合だけで捨ててパイプライン全体を落とさない。fmt なし（既存の固定値判定）は
-  従来どおり明示的失敗する。
-- フォーマット適合性はハードゲート（完全性ガード）であり、5軸ルーブリックのスコアには**しない**
-  （5軸はポリシー固定。ゴールポストは動かさない）。
+パイプライン開始前に、タスクから期待される出力形式を LLM が動的に抽出し、全段階に注入する
+（キャッチコピーなら候補形式、分析系ならテーゼ形式、直接成果物は長さ範囲で完全性判定）。
+抽出失敗時のフォールバック・安全弁・`OutputFormat` テーブルは [docs/output-format.md](docs/output-format.md)。
 
 ### 前提知識の注入（--knowledge）
 
-タスクに付随する素材・制約・背景情報（材料、ターゲット層、価格帯、資料等）を
-生成の土台として全段階に注入する。fmt（形の制約）と対になる**内容の制約**であり、直交する:
-
-```
-Task → 【前提知識】 → 【このタスクの草案形式 / 最終成果物形式】（fmt）
-```
-
-| CLI | 動作 |
-|---|---|
-| `--knowledge "材料: 再生PET。ターゲット: 20〜30代。"` | 知識を直接指定 |
-| `--knowledge-file PATH` | 長文の資料・設計情報をファイルから読み込む |
-| `--ask-knowledge` | 起動時に対話的に入力する（Ctrl+D で終了） |
-
-- 指定した知識は **diverge（草案）/ aufheben（止揚）/ finalize（最終化）/ generate（単発）** の
-  全生成段階にタスク直後として注入される。素材を超えた捏造を防ぎ、成果物が知識と矛盾しない。
-- **extract_format には注入しない**——形式抽出（形）はタスクのみから行い、知識（内容）を混ぜない。
-- **5軸評価には注入しない**——ポリシー固定。生成の土台の範囲外。
-- **improve の改修ラウンドに永続する**——diverge が内部で知識を付与するため、ラウンドをまたいで落ちない。
-- **compare は公平**——素の生成ベースラインにも同じ知識を注入して比較する。
-- 指定した知識は `--out/knowledge.md` に保存される（input.md / format.md と並列・透明性）。
-- 知識なし（従来挙動）は一切注入しない。3つの指定方法は相互排他。
+素材・制約・背景情報を生成の土台として全段階に注入する（fmt=形の制約と対になる内容の制約）。
+指定方法・注入範囲・保存先の詳細は [docs/knowledge.md](docs/knowledge.md)。
 
 ### 昇華優位性の計測（compare）
 
-`compare` は「昇華」と「単発生成（または昇華しない最良草案選択）」を同じ入力で走らせ、
-スコアと勝率を実測して比較する装置である。優位性の断言はせず、数値に委ねる。
+「昇華」と「単発生成（または昇華しない最良草案選択）」を同一入力・同一評価器で走らせ、
+スコアと勝率を実測する。`--runs N` で統計集計（勝率・95%CI・効果量）を出力し、各 run の
+raw / elevated は `render_comparison.py` で比較ドキュメント化できる。
+詳細は [docs/measurement.md](docs/measurement.md)。
 
-| オプション | 動作 |
-|---|---|
-| `--runs N` | 比較を N 回反復し、平均 overall・標準偏差・勝率（ELEVATE > ベースライン）を出力。既定 1 |
-| `--baseline single` | ベースライン = 素の単発生成（`generate`）。既定 |
-| `--baseline best-of-n` | ベースライン = **昇華しない最良草案選択**（帰無仮説）。同一の8草案から昇華せず最高スコアの草案を選ぶ場合と、昇華する場合を同一評価器で測る。`--evaluate` 必須 |
-| `--no-strong-claim` | エージェントから旧「最強の主張」断言枠を除去（テーゼ集中形式では実質 no-op。後方互換のため維持） |
+### 反復改善（improve）
 
-`--runs N`（N>1）を渡すと、各 run のスコアを集計して以下を出力する:
-
-```bash
-=== 比較集計 ===
-素の生成（単発）: mean=0.778 sd=0.012（n=3）
-ELEVATE:            mean=0.812 sd=0.009（n=3）
-差（ELEVATE−ベースライン）: mean=0.034 sd=0.015（n=3）
-勝率（ELEVATE > ベースライン）: 3/3 = 100.0%
-  勝率 95%CI（Wilson）: 43.8%〜100.0%
-  差の 95%CI（t, 両側）: -0.003〜+0.071
-  効果量（Cohen's d）: +1.90
-```
-
-（上記は集計フォーマットの形式例であり、値は実測ではない。
-95%CI は小標本では広く開く——n≥10 まで集めてから統計的優位性を論じること。）
-
-同一タスク・同一モデルでこの計測を多数回実行し、結果を examples/ に公開することが、
-本エンジンの存在理由を実証する経路である。勝率が 50% を下回るタスクが存在してもよい
-（その開示こそが誠実な主張になる）。
-
-**実証は統計だけでなく、成果物を読むことでもある。** `compare` は各 run に素AI生成（`raw.md`）と
-昇華版（`elevated.md`）を両方保存する。それらを客観視するための比較ドキュメントを生成する:
-
-```bash
-python render_comparison.py examples/<sample_dir>        # comparison.md（両方を束ねる）
-python render_comparison.py examples/<sample_dir> --html # + comparison.html（横並び表示）
-```
-
-**サンプルは「full」だけに偏らせない。** 分野をばらけさせ、エージェント数・ループ数を振る。
-昇華優位性が特定のタスク・構成に依存しないことを、複数条件の実測で示すのが目的である。
-
-### 反復改善（improve）— 昇華版を磨くループ
-
-`improve` は、一度作った昇華版を**繰り返し磨き上げる**ためのループである:
-
-```
-昇華版 → 改修の草案(複数) → 昇華 → 新しい昇華版 → （繰り返し）
-```
-
-- round 1: オリジナルタスクから発散 → 昇華で**初回の昇華版**を作る。
-- round 2 以降: 各エージェントが**前回の昇華版を改修した草案**を書き、それらを昇華して
-  次の昇華版を作る。昇華版の成果がループを回すごとに相続され、積み上がっていく。
-  （「昇華したらおしまい」ではなく、昇華版を土台にしてさらに磨く。）
-- 各 round は `round_NN/` に分離保存（`draft_*` / `reconciliation` / `elevated`）され、
-  履歴が追える。`progress.md` に全 round の長さと評価が記録される。
-
-```bash
-python main.py improve "タスク" --rounds 3                # 3回の昇華を繰り返す
-python main.py improve "タスク" --rounds 5 --evaluate     # 各ラウンドを品質評価
-```
-
-| オプション | 動作 |
-|---|---|
-| `--rounds N` | 昇華を繰り返す回数（既定 3） |
-| `--evaluate` | 各ラウンドの昇華版を品質評価し、overall を progress.md に記録 |
-| `--min-improve` | 頭打ちしきい値。直前ラウンドからの overall 改善がこれ未満なら早期停止（既定 0.01）。`--evaluate` 時のみ |
-| `--quality-ceiling` | 高品位停止しきい値。overall がこれ以上なら改修ラウンドを生成せず停止（既定 0.75）。`--evaluate` 時のみ・既定で有効 |
-
-`--evaluate` の早期停止は、**過修正で元の良さを失わせない**ための安全弁である。
-(1) **高品位停止**: 昇華版の overall が `--quality-ceiling`（既定 0.75）以上なら、
-次の改修ラウンドを生成せず停止する。既に高品位な成果物ほど改修で壊れやすい。
-(2) **頭打ち停止**: 直前ラウンドからの改善が `--min-improve`（既定 0.01）
-未満なら停止。ゼロからやり直す `compare` とは対照的に、`improve` は相続によって
-改善していく。停止理由は `progress.md` の「**停止理由**」に記録される。
-
-mock での動作確認（品質評価は mock では無効のため、overall = 均等重み × 各軸。素の生成相当は 0.600 から始まる。Pass しきい値 0.60）:
-
-```
-[round 1 昇華版] overall=0.600（Pass）     ← 素の生成相当。天井でなく改善の余地がある
-[round 2 昇華版] overall=0.720（Pass）   +0.120
-[round 3 昇華版] overall=0.720（Pass）   +0.000 → 頭打ちと判断し停止（過修正を避ける）
-```
+昇華版を土台に「改修草案 → 昇華」を繰り返し磨くループ。各 round は `round_NN/` に保存され、
+`--evaluate` で高品位停止・頭打ち停止の安全弁が働く。詳細は [docs/measurement.md](docs/measurement.md)。
 
 ### 生成エンジン（--engine）
 
@@ -369,36 +237,8 @@ SDK 経由の空応答は `CLAUDE_MAX_RETRIES`（既定6）で再試行する。
 
 ## Python API
 
-```python
-from elevate import DraftEngine, Draft
-from adapters.claude_client import ClaudeClient
-
-engine = DraftEngine(ClaudeClient(), draft_temperature=0.9)
-
-# 素のAI（単発生成）— 1 call
-raw = engine.generate("健康AIの企画")
-
-# エージェント管理
-engine.list_agents()                 # 8種のデフォルトエージェント（agents/*.md から読込）
-engine.add_agent("legal", "あなたは法規制の専門家です。")
-engine.remove_agent("storyteller")
-
-# Step 1: DIVERGE — 独立草案を生成（既定は全エージェント）
-drafts = engine.diverge("健康AIの企画")
-# draft_dir を渡すと各草案を空ファイルから生成中に逐次追記（CLI は既定で outputs/{タスク名}/ を渡す）
-drafts = engine.diverge("健康AIの企画", draft_dir=Path("examples/health-ai"))
-
-# Step 2: SYNTHESIZE — 複数の異なる草案を昇華（核心）
-elevated = engine.synthesize(drafts)     # 内部: aufheben → finalize
-elevated = engine.synthesize(drafts, method="single-pass")   # 単発昇華
-
-# 外部草案もそのまま昇華できる
-external = [Draft(agent="human-expert", content="..."), Draft(agent="other-model", content="...")]
-elevated = engine.synthesize(external)
-
-# 便利ラッパー: diverge → synthesize 一気
-elevated = engine.elevate("健康AIの企画")
-```
+`elevate.DraftEngine` で generate / diverge / synthesize / elevate を直接呼べる
+（外部草案もそのまま昇華できる）。使用例は [docs/api.md](docs/api.md)。
 
 ## リポジトリ構成
 
@@ -427,6 +267,7 @@ elevate-draft-engine/
 ├── tests/                      # 184件
 ├── examples/                   # 実行サンプル集（分野横断テストケース等）
 │   └── multi-domain/           # 分野横断フォーマット認識+知識注入の検証ケース
+├── docs/                       # 深掘り詳細（output-format / knowledge / measurement / api）
 ├── CLAUDE.md                   # プロジェクト指示（AI向け）
 ├── HISTORY.md                  # 開発履歴（ルーブリック再調整・旧実測等）
 ├── install.sh                  # agents + skill を Claude Code 検出先へ symlink 設置
