@@ -110,13 +110,13 @@ def _draft_pair() -> list[Draft]:
 
 # ---- 素の生成 ----
 
-def test_generate_uses_analysis_system_at_default_temperature() -> None:
-    """generate() は ANALYSIS_SYSTEM + 既定温度（None → 0.0）で1回だけ呼ぶ。"""
+def test_generate_is_instruction_only_with_no_system_prompt() -> None:
+    """generate()（素の生成）は指示のみ——システムプロンプトを渡さず1回だけ呼ぶ。"""
     client = MockGenerator()
     engine = DraftEngine(client)
     out = engine.generate("タスク")
     assert len(client.calls) == 1
-    assert client.calls[0]["system"] == ANALYSIS_SYSTEM
+    assert client.calls[0]["system"] == ""
     assert client.calls[0]["user"] == "タスク"
     assert client.calls[0]["temperature"] is None
     assert out

@@ -383,6 +383,26 @@ def _elevated_is_complete(text: str, fmt: OutputFormat | None = None) -> bool:
     return stripped.endswith(_SYNTHESIS_TERMINAL_MARKERS)
 
 
+def _baseline_is_complete(text: str, fmt: OutputFormat | None = None) -> bool:
+    """素の生成（指示のみ）の完全性判定。打ち切り（未完了）だけを再生成対象にする。
+
+    _elevated_is_complete と違い**下限を強制しない**。素の生成は「指示のみ」のナイーブな
+    答えであり、フォーマットの分量下限（例: 700字）を満たさないのはナイーブさの反映であって
+    不完全ではない。下限を強制すると短い素直な答えが再生成され続け、compare のベースラインが
+    成立しない（実測 2026-08-09: 素の生成3回が「分量不足」で連続失敗）。上限超過（report化）と
+    文終端なし（打ち切り）だけを不完全とみなす。
+    """
+    if not text:
+        return False
+    max_len = fmt.max_output_length if fmt is not None else ELEVATED_MAX_LENGTH
+    if len(text) > max_len:
+        return False  # 出力量過多（report化）
+    if fmt is not None and fmt.output_is_direct:
+        return True  # 直接成果物は文終端を要しない
+    stripped = text.rstrip("*`~\t\n ")
+    return stripped.endswith(_SYNTHESIS_TERMINAL_MARKERS)
+
+
 # ---- 出力フォーマット（LLM による動的抽出） ----
 #
 # パイプラインは従来、出力形式を「分析レポート（テーゼ草案 → TVRO 最終化）」に固定していた。
@@ -774,7 +794,13 @@ class DraftEngine:
 
     def generate(self, task: str, *, sink: Path | None = None,
                  fmt: OutputFormat | None = None, knowledge: str | None = None) -> str:
-        """素のAI（単発生成）: 温度 0.0 で成果物を生成する。1 call。
+        """素のAI（単発生成）: 指示のみで成果物を生成する。1 call。
+
+        素の生成は**指示のみ**——システムプロンプトを渡さない。リポジトリの機構
+        （昇華・エージェント・ルーブリック）の存在を知らせないことが前提。これにより
+        compare のベースラインは「素の AI が指示だけを見て書いた答え」になる。
+        claude-code エンジンではシステムプロンプトが空のとき `--system-prompt` を省略し、
+        中性ディレクトリから起動して CLAUDE.md（リポジトリの自己記述）も読み込ませない。
 
         草案と同じ完全性ガード（broken output → regenerate）を適用する——
         打ち切られたベースラインを不公平に採点しない。sink が与えられたら、
@@ -782,7 +808,8 @@ class DraftEngine:
 
         fmt が渡されたら、そのフォーマット固有の最終化指示をタスクに追記する
         （compare の素の生成ベースラインにも同じフォーマットを与えて公平に比較する）。
-        完全性判定はフォーマット固有の長さ範囲で行う。
+        完全性判定はフォーマット固有の上限超過だけを再生成対象にする（下限は強制しない——
+        素の生成のナイーブさがそのままベースラインになる）。
         knowledge が渡されたら、前提知識をタスク直後に追記する
         （compare の素の生成ベースラインにも同じ前提知識を与えて公平に比較する）。
         """
@@ -794,11 +821,11 @@ class DraftEngine:
                 f"{task_for_model}\n\n【このタスクの最終成果物形式】\n{fmt.finalize_guidance}"
             )
         is_complete = (
-            (lambda text: _elevated_is_complete(text, fmt)) if fmt is not None
+            (lambda text: _baseline_is_complete(text, fmt)) if fmt is not None
             else _synthesis_is_complete  # fmt なし = 従来どおり文終端のみ（後方互換）
         )
         return _generate_with_completeness_guard(
-            self.client, ANALYSIS_SYSTEM, task_for_model, label="素の生成",
+            self.client, "", task_for_model, label="素の生成",
             is_complete=is_complete, sink=sink,
         )
 

@@ -2,7 +2,10 @@
 
 各コールを 1 つの `claude -p` プロセスとして起動する——各エージェントを独立した
 サブエージェントとして起動し、互いの文脈を共有しない独立起動をライブラリで実現する。
-system（ペルソナ）は `--system-prompt` で渡す。
+system（ペルソナ）は `--system-prompt` で渡す。system が空のとき（素の生成＝指示のみ）は
+`--system-prompt` を省略し、中性ディレクトリから起動する。これはリポジトリの CLAUDE.md
+（リポジトリの自己記述）を読み込ませないためで、素の生成がリポジトリの機構の存在を
+知らない「指示のみ」の答えを出す前提を守る。
 
 背景: 生 SDK（anthropic.Anthropic）は Claude Code 互換ゲートウェイが間欠的に空応答
 （200・空文字列、stop=max_tokens）を返す環境で不安定だった（2026-08-08 実測:
@@ -15,6 +18,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import tempfile
 import time
 from typing import Callable
 
@@ -84,16 +88,20 @@ class ClaudeCodeClient:
         text ブロックが累積テキストを持つため、前回分からの差分（text[len(cumulative):]）だけを
         返す。timeout を超えたらプロセスを kill し、届いた分を返す（完全性ガードが再生成する）。
         """
+        cmd = ["claude", "-p", "--verbose", "--output-format", "stream-json"]
+        if system and system.strip():
+            cmd += ["--system-prompt", system]
+        cmd.append(prompt)
         proc = subprocess.Popen(
-            [
-                "claude", "-p", "--verbose", "--output-format", "stream-json",
-                "--system-prompt", system,
-                prompt,
-            ],
+            cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
             bufsize=1,
+            # 中性ディレクトリから起動し、リポジトリの CLAUDE.md（リポジトリの自己記述）を
+            # 読み込ませない。素の生成（指示のみ）は言うまでもなく、昇華側も各コールは
+            # 自己完結したプロンプトなので、リポジトリ文脈に依存しない（独立サブエージェント）。
+            cwd=tempfile.gettempdir(),
         )
         chunks: list[str] = []
         cumulative = ""

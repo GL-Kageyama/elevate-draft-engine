@@ -135,13 +135,16 @@ class ClaudeClient:
         for attempt in range(self.config.max_retries):
             try:
                 self._throttle()
-                response = self.client.messages.create(
-                    model=model,
-                    max_tokens=self.config.max_tokens,
-                    temperature=temp,
-                    system=system,
-                    messages=[{"role": "user", "content": user}],
-                )
+                kwargs: dict = {
+                    "model": model,
+                    "max_tokens": self.config.max_tokens,
+                    "temperature": temp,
+                    "messages": [{"role": "user", "content": user}],
+                }
+                # 素の生成（指示のみ）ではシステムプロンプトを渡さない。
+                if system and system.strip():
+                    kwargs["system"] = system
+                response = self.client.messages.create(**kwargs)
                 text = "".join(
                     b.text for b in response.content if getattr(b, "type", "") == "text"
                 ).strip()
