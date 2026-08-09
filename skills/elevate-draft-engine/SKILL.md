@@ -1,14 +1,14 @@
 ---
 name: elevate-draft-engine
 description: Facade to invoke the elevate-draft-engine pipeline (diverge → aufheben → finalize). Given a task, runs the Python engine via main.py, saves input + each draft + reconciliation + elevated artifact into examples/<task>/ (or a custom dir), and reports the result. Supports elevate / improve（昇華版→改修草案→昇華の反復）/ compare（素の生成 vs 昇華の実測）. All orchestration, completeness guards, and temperature control live in the engine — this skill only calls it. Use to elevate an idea through dialectical sublation (Aufheben) of maximally-divergent creator drafts, to re-sublimate existing draft files, to iteratively refine an elevated artifact, or to measure whether aufheben beats single-shot generation.
-argument-hint: 'JSON: {"command": "elevate|improve|compare|synthesize", "task": "<タスク>", "agents": ["strategist","humanist",...], "method": "two-stage|single-pass", "engine": "claude-code|sdk|mock", "rounds": 3, "evaluate": true, "min_improve": 0.01, "quality_ceiling": 0.85, "runs": 1, "baseline": "single|best-of-n", "output_format": "<任意指定; OutputFormat の JSON。省略でタスクから LLM が動的に抽出>", "knowledge": "<任意指定; 前提知識（素材・制約・背景）。生成の全段階に注入し --out/knowledge.md に保存>", "knowledge_file": "<任意指定; 前提知識をファイルから読み込む>", "ask_knowledge": "<任意指定; 起動時に対話入力>", "save_dir": "<任意指定; 省略で examples/<slug> に自動保存>"}'
+argument-hint: 'JSON: {"command": "elevate|improve|compare|synthesize", "task": "<タスク>", "agents": ["strategist","humanist",...], "method": "two-stage|single-pass", "engine": "claude-code|sdk|mock", "rounds": 3, "evaluate": true, "min_improve": 0.01, "quality_ceiling": 0.75, "runs": 1, "baseline": "single|best-of-n", "output_format": "<任意指定; OutputFormat の JSON。省略でタスクから LLM が動的に抽出>", "knowledge": "<任意指定; 前提知識（素材・制約・背景）。生成の全段階に注入し --out/knowledge.md に保存>", "knowledge_file": "<任意指定; 前提知識をファイルから読み込む>", "ask_knowledge": "<任意指定; 起動時に対話入力>", "save_dir": "<任意指定; 省略で examples/<slug> に自動保存>"}'
 ---
 
 # Elevate Draft Engine — Facade
 
 ## Skill Metadata
 - **id**: `elevate-draft-engine`
-- **version**: `2.2.0`
+- **version**: `2.3.0`
 - **category**: `facade`（runbook。オーケストレーションは Python エンジンが担当）
 - **standalone**: `true`（サブエージェントを必要としない。エージェントはエンジンが `agents/*.md` から読む）
 - **requires_agents**: `[]`
@@ -47,9 +47,9 @@ Python エンジン側にある。**クリエイターエージェントをサ�
 | `method` | `two-stage` | `two-stage`（昇華→最終化）/ `single-pass`（単発昇華） |
 | `engine` | `claude-code` | `claude-code`（`claude -p` 独立起動・安定）/ `sdk` / `mock` |
 | `rounds` | `3` | `improve` のみ: 昇華を繰り返す回数。round 2 以降は前回の昇華版を改修した草案を昇華 |
-| `evaluate` | `false` | `improve`: 各ラウンドの昇華版を5軸評価し、改善が頭打ちなら早期停止 / `compare`: スコア比較を有効化 |
+| `evaluate` | `false` | `improve`: 各ラウンドの昇華版を品質評価し、改善が頭打ちなら早期停止 / `compare`: スコア比較を有効化 |
 | `min_improve` | `0.01` | `improve --evaluate` の早期停止しきい値。直前ラウンドからの overall 改善がこれ未満なら停止（頭打ち。過修正を避ける） |
-| `quality_ceiling` | `0.85` | `improve --evaluate` の高品位停止しきい値。昇華版の overall がこれ以上なら改修ラウンドを生成せず停止（既に高品位な成果物ほど改修で壊れやすいため） |
+| `quality_ceiling` | `0.75` | `improve --evaluate` の高品位停止しきい値。昇華版の overall がこれ以上なら改修ラウンドを生成せず停止（既に高品位な成果物ほど改修で壊れやすいため。品質評価の掛け算で overall の絶対値が下がるため 0.85→0.75 に再調整） |
 | `runs` | `1` | `compare` のみ: 比較を N 回反復し統計集計（平均・勝率・標準偏差・95%CI）を出力 |
 | `baseline` | `single` | `compare` のみ: `single`（素の単発生成）/ `best-of-n`（昇華しない最良草案選択＝帰無仮説） |
 | `output_format` | 動的抽出 | OutputFormat の JSON を明示指定（LLM 抽出をスキップ。mock でも有効）。省略時は実APIでタスクから LLM が動的に抽出（キャッチコピー・歌詞・事業計画など分野ごとの形式） |
@@ -121,7 +121,7 @@ cd "$ENGINE_REPO"
 .venv/bin/python main.py improve "$TASK" --rounds 3 --evaluate --out "$SAVE_DIR/improve"
 ```
 
-  - `--evaluate` で各ラウンドの昇華版を5軸評価し、(1) overall が既に `--quality-ceiling`（既定 0.85）以上なら**高品位停止**（次の改修ラウンドを作らず終了）、(2) 改善が `--min-improve`（既定 0.01）未満なら頭打ちで停止。どちらも過修正で元の良さを失わせないための機構（高品位な成果物ほど改修で壊れやすい）。停止理由は `progress.md` の「**停止理由**」に記録される。各 round は `round_NN/` に分離保存。
+  - `--evaluate` で各ラウンドの昇華版を品質評価し、(1) overall が既に `--quality-ceiling`（既定 0.75）以上なら**高品位停止**（次の改修ラウンドを作らず終了）、(2) 改善が `--min-improve`（既定 0.01）未満なら頭打ちで停止。どちらも過修正で元の良さを失わせないための機構（高品位な成果物ほど改修で壊れやすい）。停止理由は `progress.md` の「**停止理由**」に記録される。各 round は `round_NN/` に分離保存。
 
 - 「昇華が単発生成を上回るか」の実測は `compare` を使う（generate vs elevate を**同一評価器**で採点。ブラインドのため条件ラベルは評価器に渡らない）:
 

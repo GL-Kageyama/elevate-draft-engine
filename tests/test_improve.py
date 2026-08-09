@@ -146,9 +146,9 @@ def test_improve_progress_marks_loop(tmp_path) -> None:
 # overall の昇華版は、次の改修ラウンドを生成せず停止する（絶対品質での早期停止）。
 
 def test_improve_default_ceiling_not_hit_by_mock(tmp_path) -> None:
-    """既定しきい値（0.85）では mock（最高 overall 0.720）は高品位停止しない。
+    """既定しきい値（0.75）では mock（最高 overall 0.720）は高品位停止しない。
 
-    高品位停止は既定で有効だが、mock は 0.85 に届かないため、従来どおり
+    高品位停止は既定で有効だが、mock は 0.75 に届かないため、従来どおり
     頭打ち（gain < min-improve）で停止する。既定値の確認を兼ねる。
     """
     code, out = _run_improve(

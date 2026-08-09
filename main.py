@@ -6,7 +6,7 @@
     python main.py synthesize draft1.md draft2.md  # 外部草案を昇華（核心）
     python main.py elevate "タスク"                  # diverge → synthesize 一気
     python main.py compare "タスク"                  # generate vs elevate 両方出力
-    python main.py compare "タスク" --evaluate       # + 5軸評価でスコア比較
+    python main.py compare "タスク" --evaluate       # + 品質評価（5軸+新奇度・独自性・意外性）でスコア比較
     python main.py improve "タスク" --rounds 3       # 昇華版→改修の草案→昇華 のループで反復改善
     python main.py improve "タスク" --rounds 3 --evaluate  # + 各ラウンド採点・頭打ちで早期停止
 
@@ -23,6 +23,8 @@
     --knowledge TEXT      前提知識を直接指定（素材・制約・背景情報。生成の土台として全段階に注入）
     --knowledge-file PATH 前提知識をファイルから読み込み（長文の資料等）
     --ask-knowledge       起動時に対話的に前提知識を入力（--out/knowledge.md に保存）
+    --quality / --no-quality  品質評価（新奇度・独自性・意外性）を overall に統合するか
+                          （既定: 統合。overall = 5軸overall × (α + (1−α)×品質スコア)、α=0.25）
 
 認証: ANTHROPIC_API_KEY（通常）または ANTHROPIC_AUTH_TOKEN + ANTHROPIC_BASE_URL（ゲートウェイ）。
 スロットル（空応答対策）は既定 2 秒（CLAUDE_MIN_INTERVAL_SECONDS で変更可）。
@@ -49,9 +51,15 @@ def _build_parser() -> argparse.ArgumentParser:
     common.add_argument("--agents", nargs="+", default=None, help="使用するエージェント（既定: 全エージェント）")
     common.add_argument("--out", type=Path, default=None, help="成果物を保存するディレクトリ（省略時は outputs/{タスク名}/ にデフォルト保存）")
     common.add_argument("--no-strong-claim", action="store_true", help="エージェントから旧「最強の主張」断言枠を除去（テーゼ集中形式では実質 no-op。後方互換のため維持）")
-    common.add_argument("--runs", type=int, default=1, help="compare の比較を N 回反復して統計集計（平均・勝率・標準偏差・95%信頼区間）を出力（既定 1）")
+    common.add_argument("--runs", type=int, default=1, help="compare の比較を N 回反復して統計集計（平均・勝率・標準偏差・95%%信頼区間）を出力（既定 1）")
     common.add_argument("--baseline", default="single", choices=["single", "best-of-n"], help="compare の比較対象ベースライン（既定 single: 素の単発生成 / best-of-n: 昇華なし最良草案選択＝帰無仮説）")
     common.add_argument("--logic-check", action="store_true", help="最終化の後に論理一貫性の復元工程を適用（昇華の多様化への偏りへの収束工程。既定は無効。旧5軸実測由来）")
+    quality_group = common.add_mutually_exclusive_group()
+    quality_group.add_argument("--quality", dest="quality", action="store_true",
+                               help="品質評価（新奇度・独自性・意外性）を overall に統合して算出する（既定。--evaluate 時に有効）")
+    quality_group.add_argument("--no-quality", dest="quality", action="store_false",
+                               help="品質評価を統合しない（5軸のみの overall）")
+    common.set_defaults(quality=True)
     common.add_argument("--output-format", default=None, metavar="JSON",
                         help="出力形式の仕様を JSON で明示指定する（LLM 抽出をスキップ。mock でも有効。"
                              "例: '{\"deliverable_type\":\"キャッチコピー\",\"min_output_length\":2,"
@@ -103,8 +111,8 @@ def _build_parser() -> argparse.ArgumentParser:
     imp.add_argument("--evaluate", action="store_true", help="各ラウンドの昇華版を5軸評価し、改善が頭打ちなら早期停止")
     imp.add_argument("--min-improve", type=float, default=0.01,
                     help="--evaluate 時の早期停止しきい値。直前ラウンドからの overall 改善がこれ未満なら停止（既定 0.01）")
-    imp.add_argument("--quality-ceiling", type=float, default=0.85,
-                    help="--evaluate 時の高品位停止しきい値。昇華版の overall がこれ以上なら改修を停止（既定 0.85。既に高品位の成果物は改修で壊れやすいため過修正を避ける）")
+    imp.add_argument("--quality-ceiling", type=float, default=0.75,
+                    help="--evaluate 時の高品位停止しきい値。昇華版の overall がこれ以上なら改修を停止（既定 0.75。既に高品位の成果物は改修で壊れやすいため過修正を避ける。品質評価の掛け算で overall の絶対値が下がるため 0.85→0.75 に再調整）")
     imp.set_defaults(func=cmd_improve)
 
     cal = sub.add_parser(
@@ -249,13 +257,13 @@ class MockEvaluator:
         return EvaluationResult(
             scores=scores,
             overall=compute_overall(scores),
-            pass_threshold=0.70,
+            pass_threshold=0.60,
             rationale="モック評価",
             raw="モック評価",
         )
 
     def score_judgment(self, overall: float) -> str:
-        if overall >= 0.70:
+        if overall >= 0.60:
             return "Pass"
         if overall >= 0.50:
             return "Revise"
@@ -280,12 +288,20 @@ def _make_engine(args: argparse.Namespace) -> DraftEngine:
 
 
 def _make_evaluator(args: argparse.Namespace):
+    """評価エンジンを作る。品質評価（新奇度・独自性・意外性）を overall に統合する。
+
+    mock では品質評価を統合しない（品質評価にはモックが無い。5軸評価には MockEvaluator がある）。
+    実API時のみ品質評価を統合する。--no-quality で5軸のみに戻せる。
+    """
     if args.mock:
         return MockEvaluator()
     from adapters.claude_client import ClaudeClient
     from evaluation.evaluator import EvaluationEngine
+    from evaluation.quality import QualityEvaluator
 
-    return EvaluationEngine(ClaudeClient())
+    client = ClaudeClient()
+    quality = QualityEvaluator(client) if getattr(args, "quality", True) else None
+    return EvaluationEngine(client, quality_evaluator=quality)
 
 
 def _parse_output_format(raw: str) -> OutputFormat:
@@ -604,11 +620,20 @@ def _evaluate_and_report(label: str, artifact: str, task: str, evaluator, *, sav
     """単回評価して報告し、結果オブジェクトを返す（統計集計は .overall で使う）。
 
     save_to 指定時は、その run の評価記録（overall・各次元・根拠）を Markdown で保存する。
+    評価結果に品質評価（result.quality = QualityResult）が含まれていたら、5軸評価に加えて
+    品質評価（新奇度・独自性・意外性）も表示・保存する。overall は品質評価込みの値。
     """
     result = evaluator.evaluate(artifact, task)
     print(f"[{label}] overall={result.overall:.3f}（{evaluator.score_judgment(result.overall)}）")
     for k, v in result.scores.items():
         print(f"    {k}: {v:.2f}")
+    quality = getattr(result, "quality", None)
+    if quality is not None:
+        from evaluation.quality import format_quality_line
+
+        print(f"    {format_quality_line(quality)}")
+        if quality.rationale:
+            print(f"    根拠: {quality.rationale}")
     print()
     if save_to is not None:
         _save_evaluation_record(save_to, label, result, evaluator)
@@ -616,7 +641,7 @@ def _evaluate_and_report(label: str, artifact: str, task: str, evaluator, *, sav
 
 
 def _save_evaluation_record(path: Path, label: str, result, evaluator) -> None:
-    """単一評価の記録（overall・各次元・根拠）を Markdown で保存する。"""
+    """単一評価の記録（overall・各次元・根拠・品質評価）を Markdown で保存する。"""
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = [
         f"## {label}",
@@ -628,6 +653,16 @@ def _save_evaluation_record(path: Path, label: str, result, evaluator) -> None:
     rationale = getattr(result, "rationale", None)
     if rationale:
         lines.append(f"- 根拠: {rationale}")
+    quality = getattr(result, "quality", None)
+    if quality is not None:
+        lines.extend([
+            "- 品質評価（高いほど良い）:",
+            f"  - 新奇度: {quality.novelty:.2f}",
+            f"  - 独自性: {quality.originality:.2f}",
+            f"  - 意外性: {quality.surprise:.2f}",
+        ])
+        if quality.rationale:
+            lines.append(f"  - 判定: {quality.rationale}")
     path.write_text("\n".join(lines) + "\n")
     print(f"→ 保存: {path}")
 
@@ -902,7 +937,7 @@ def cmd_improve(args: argparse.Namespace) -> None:
     昇華版の成果がループを回すごとに相続・改善されていく。
 
     --evaluate を付けると各ラウンドの昇華版を採点し、
-    1) 既に高品位（overall >= --quality-ceiling、既定 0.85）なら改修連鎖を停止し、
+    1) 既に高品位（overall >= --quality-ceiling、既定 0.75）なら改修連鎖を停止し、
     2) 改善がしきい値（--min-improve）未満になったら頭打ちで早期停止する。
     どちらも過修正で元の良さを失わせないための機構（高品位な成果物ほど改修で壊れやすい）。
     """

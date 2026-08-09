@@ -54,10 +54,32 @@ AIが一発で出す「平均的な良い答え」を超えるために、**DIVE
 
 採点のルール:
 
-- **重みは均等（各 0.20）**: `overall = 多様性×0.20 + 統合性×0.20 + 超越性×0.20 + 誠実性×0.20 + 実用性×0.20`
+- **重みは均等（各 0.20）**: `5軸overall = 多様性×0.20 + 統合性×0.20 + 超越性×0.20 + 誠実性×0.20 + 実用性×0.20`
 - **全軸「高いほど良い」**: 全5軸ともスコアが高いほど良い成果物を示す（反転ロジックはない）。
 - **採点アンカー**: 0.5 = 無難（凡庸） / 0.7〜0.8 = 確かに良い / 0.9 以上 = 凡庸な生成では出ない「固有の枠組み・見方の転換」。凡庸な出力に 0.7 以上をつけない。
 - **盲検**: 評価は生成とは独立した評価専用モデルが、成果物の出所・生成方法を知らされずに行う。
+
+## 品質評価（overall に統合）
+
+`--evaluate` の overall は、5軸評価に**品質評価（定番さ・独自性）**を掛け算で統合する。
+5軸評価は「定番さ・独自性」を測らないため、素の生成（指示のみ）が定番タスクで無難な回答を
+出しても 5軸 overall が高止まりし、独自性の差が反映されない。品質評価がこの死角を埋める。
+
+| 観点 | 概要 | 高いほど |
+|---|---|---|
+| **新奇度** | そのタスクの「典型的な回答」からどの程度逸脱しているか | 目新しく、定番レパートリーに収まっていない |
+| **独自性** | 定番レパートリーにない固有の視点・概念枠組み・造語・哲学があるか | 固有の枠組みがある |
+| **意外性** | 読み手の予想を裏切る要素があるか | 予想を裏切る |
+
+overall の式（α = 0.25。`0.75` は `1−α`）:
+
+    overall = 5軸overall × (α + (1−α) × 品質スコア)
+    品質スコア = (新奇度 + 独自性 + 意外性) / 3
+
+- **定番回答は大幅に減点される**: 品質スコア 0.2（定番）なら係数 0.40、0.8（独自）なら係数 0.85。
+  実測では素の生成（定番）と昇華（独自）の overall 差が、5軸単独の 0.03 程度から 0.4 前後に拡大する。
+- **Pass しきい値は 0.60**: 品質評価の掛け算で overall の絶対値が下がるため、5軸単独時代の 0.70 から再調整。
+- **`--no-quality`** で品質評価なし（5軸のみの overall）に戻せる。
 
 ## エージェント（agents/）
 
@@ -110,7 +132,7 @@ Aufheber が引き受ける。
 
 ```bash
 python -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/python -m pytest tests/ -q     # 167件
+.venv/bin/python -m pytest tests/ -q     # 182件
 
 # API 不要のモックでパイプライン確認
 .venv/bin/python main.py compare "健康AIの企画" --mock --evaluate
@@ -137,7 +159,7 @@ python main.py diverge "タスク"                  # 8エージェントで草�
 python main.py synthesize draft1.md draft2.md  # 外部草案を昇華（核心）
 python main.py elevate "タスク"                  # diverge → synthesize 一気
 python main.py compare "タスク"                  # generate vs elevate 両方出力
-python main.py compare "タスク" --evaluate       # + 5軸評価でスコア比較
+python main.py compare "タスク" --evaluate       # + 品質評価（5軸+新奇度・独自性・意外性）でスコア比較
 python main.py compare "タスク" --evaluate --runs 10        # N回反復で統計集計
 python main.py compare "タスク" --evaluate --baseline best-of-n  # 帰無仮説比較
 python main.py compare "タスク" --evaluate --no-strong-claim      # 断言枠アブレーション
@@ -153,7 +175,7 @@ python main.py improve "タスク" --rounds 3 --evaluate             # + 各ラ�
 `outputs/{タスク名}/` に自動保存。diverge / elevate / compare / improve すべて全成果物を対象）/
 `--runs N`（compare を N 回反復）/ `--baseline single|best-of-n`（比較対象）/
 `--no-strong-claim`（断言枠除去）/ `--logic-check`（論理一貫性の復元工程。既定は無効）/
-`--rounds N` / `--min-improve` / `--quality-ceiling`（improve の反復回数・頭打ちしきい値・高品位停止しきい値。高品位は既定 0.85 で有効）/
+`--rounds N` / `--min-improve` / `--quality-ceiling`（improve の反復回数・頭打ちしきい値・高品位停止しきい値。高品位は既定 0.75 で有効）/
 `--output-format '<JSON>'`（出力形式の明示指定。省略時は実APIでタスクから LLM が動的に抽出）/
 `--knowledge 'TEXT'` / `--knowledge-file PATH` / `--ask-knowledge`（前提知識。素材・制約・背景情報を生成の土台として全段階に注入。相互排他。保存先 `--out/knowledge.md`）
 
@@ -284,27 +306,27 @@ python render_comparison.py examples/<sample_dir> --html # + comparison.html（�
 
 ```bash
 python main.py improve "タスク" --rounds 3                # 3回の昇華を繰り返す
-python main.py improve "タスク" --rounds 5 --evaluate     # 各ラウンドを5軸評価
+python main.py improve "タスク" --rounds 5 --evaluate     # 各ラウンドを品質評価
 ```
 
 | オプション | 動作 |
 |---|---|
 | `--rounds N` | 昇華を繰り返す回数（既定 3） |
-| `--evaluate` | 各ラウンドの昇華版を5軸評価し、overall を progress.md に記録 |
+| `--evaluate` | 各ラウンドの昇華版を品質評価し、overall を progress.md に記録 |
 | `--min-improve` | 頭打ちしきい値。直前ラウンドからの overall 改善がこれ未満なら早期停止（既定 0.01）。`--evaluate` 時のみ |
-| `--quality-ceiling` | 高品位停止しきい値。overall がこれ以上なら改修ラウンドを生成せず停止（既定 0.85）。`--evaluate` 時のみ・既定で有効 |
+| `--quality-ceiling` | 高品位停止しきい値。overall がこれ以上なら改修ラウンドを生成せず停止（既定 0.75）。`--evaluate` 時のみ・既定で有効 |
 
 `--evaluate` の早期停止は、**過修正で元の良さを失わせない**ための安全弁である。
-(1) **高品位停止**: 昇華版の overall が `--quality-ceiling`（既定 0.85）以上なら、
+(1) **高品位停止**: 昇華版の overall が `--quality-ceiling`（既定 0.75）以上なら、
 次の改修ラウンドを生成せず停止する。既に高品位な成果物ほど改修で壊れやすい。
 (2) **頭打ち停止**: 直前ラウンドからの改善が `--min-improve`（既定 0.01）
 未満なら停止。ゼロからやり直す `compare` とは対照的に、`improve` は相続によって
 改善していく。停止理由は `progress.md` の「**停止理由**」に記録される。
 
-mock での動作確認（ポリシー密着5軸の下では overall = 均等重み × 各軸。素の生成相当は 0.600 から始まる）:
+mock での動作確認（品質評価は mock では無効のため、overall = 均等重み × 各軸。素の生成相当は 0.600 から始まる。Pass しきい値 0.60）:
 
 ```
-[round 1 昇華版] overall=0.600（Revise）   ← 素の生成相当。天井でなく改善の余地がある
+[round 1 昇華版] overall=0.600（Pass）     ← 素の生成相当。天井でなく改善の余地がある
 [round 2 昇華版] overall=0.720（Pass）   +0.120
 [round 3 昇華版] overall=0.720（Pass）   +0.000 → 頭打ちと判断し停止（過修正を避ける）
 ```
@@ -398,10 +420,11 @@ elevate-draft-engine/
 │   ├── claude_client.py        # Claude API クライアント（スロットル・空応答再試行込み）
 │   └── claude_code_client.py   # claude -p 独立起動（--engine claude-code）
 ├── evaluation/
-│   └── evaluator.py            # 5軸評価（自己完結。--evaluate 用）
+│   ├── evaluator.py            # 品質評価（5軸 + 掛け算統合。--evaluate 用）
+│   └── quality.py              # 品質評価の3観点（新奇度・独自性・意外性）
 ├── skills/
 │   └── elevate-draft-engine/SKILL.md   # ファサード skill（main.py を起動。オーケストレーションは委譲）
-├── tests/                      # 167件
+├── tests/                      # 182件
 ├── examples/                   # 実行サンプル集（分野横断テストケース等）
 │   └── multi-domain/           # 分野横断フォーマット認識+知識注入の検証ケース
 ├── CLAUDE.md                   # プロジェクト指示（AI向け）

@@ -1,7 +1,17 @@
-"""Evaluation Engine — 評価5軸による採点。
+"""Evaluation Engine — 評価5軸による採点（品質評価に統合）。
 
 数値定義（重み・ルーブリック・overall式）は本ファイル内の DEFAULT_WEIGHTS /
 RUBRIC / compute_overall() に集約する。
+
+**品質評価** = 5軸評価（多様性・統合性・超越性・誠実性・実用性）+
+定番さ・独自性の3観点（新奇度・独自性・意外性、evaluation/quality.py）。
+overall は掛け算方式で統合する:
+
+    overall = 5軸overall × (α + (1−α) × 品質スコア)     （α = QUALITY_ALPHA = 0.25）
+
+5軸評価は「定番さ・独自性」を測らないため、素の生成（指示のみ）が定番タスクで
+無難な回答を出しても5軸 overall が高止まりし、独自性の差が反映されない。品質評価の
+掛け算で、定番回答（品質スコア低）ほど overall が下がる。
 
 評価者は**独立評価系統**（生成とは別モデル）を使う。盲検化のため評価プロンプトに
 条件ラベルは渡さない（ブラインド化は呼び出し側の責務）。
@@ -22,6 +32,17 @@ DEFAULT_WEIGHTS: dict[str, float] = {
     "honesty": 0.20,    # 誠実性（確信と不確実の区別）— 誠実さ（未実証の明記）
     "utility": 0.20,    # 実用性（具体・実行可能・誰がどう使うか）— 実行性
 }
+
+# 品質評価（定番さ・独自性）の統合係数。
+# overall = 5軸overall × (α + (1−α) × 品質スコア)、α=0.25（品質評価強め）。
+# 品質スコア = (新奇度 + 独自性 + 意外性) / 3（QualityResult.average）。
+# 定番回答（品質スコア≈0.20）は ×0.40、独自回答（≈0.80）は ×0.85 になる。
+QUALITY_ALPHA = 0.25
+
+# Pass 判定のしきい値。品質評価の掛け算で overall の絶対値が5軸単独時より下がるため、
+# 5軸単独時代の 0.70 を新スケールに合わせて 0.60 に再調整した（実測 2026-08-09:
+# 優秀な昇華版 0.666 が Pass になる水準。5軸「確かに良い」+ 品質良 ≈ 0.64 前後）。
+DEFAULT_PASS_THRESHOLD = 0.60
 
 # 評価スコア抽出の再生成リトライ最大回数（崩れたら再生成）
 MAX_EVALUATION_RETRIES = 3
@@ -61,13 +82,19 @@ RUBRIC = """各軸を0.0〜1.0で採点する。5軸は本エンジンのポリ�
 
 @dataclass
 class EvaluationResult:
-    """評価結果。"""
+    """評価結果。
+
+    quality（QualityResult）は品質評価（定番さ・独自性）が統合されているときだけ
+    セットされる。overall はその場合 5軸overall × (QUALITY_ALPHA + (1−QUALITY_ALPHA)×
+    品質スコア) になっている。統合されていないとき（quality=None）は従来どおり5軸のみ。
+    """
 
     scores: dict[str, float]  # diversity, synthesis, elevation, honesty, utility (0-1)
     overall: float
-    pass_threshold: float = 0.70
+    pass_threshold: float = DEFAULT_PASS_THRESHOLD
     rationale: str = ""
     raw: str = ""
+    quality: Any | None = None  # QualityResult | None（品質評価が統合されたとき）
 
     @property
     def passed(self) -> bool:
@@ -116,24 +143,33 @@ def _clamp(v: float) -> float:
 
 
 class EvaluationEngine:
-    """5軸評価エンジン。評価系Claude（独立系統）を使用する。"""
+    """品質評価エンジン。5軸評価 + 品質評価（定番さ・独自性）を overall に統合する。
+
+    評価系Claude（独立系統）を使用する。quality_evaluator（QualityEvaluator）が渡されると、
+    overall = 5軸overall × (QUALITY_ALPHA + (1−QUALITY_ALPHA) × 品質スコア) で統合する。
+    渡されない（None）ときは従来どおり5軸のみ（後方互換）。
+    """
 
     def __init__(
         self,
         client: EvaluationClient,
         *,
         weights: dict[str, float] | None = None,
-        pass_threshold: float = 0.70,
+        pass_threshold: float = DEFAULT_PASS_THRESHOLD,
+        quality_evaluator=None,
     ):
         self.client = client
         self.weights = weights or DEFAULT_WEIGHTS
         self.pass_threshold = pass_threshold
+        self.quality_evaluator = quality_evaluator  # QualityEvaluator | None
 
     def evaluate(self, artifact: str, task_prompt: str = "") -> EvaluationResult:
-        """成果物を5軸で採点する。盲検化のため task_prompt に条件情報を含めないこと。
+        """成果物を品質評価（5軸 + 定番さ・独自性）で採点する。
 
-        スコアJSONの抽出に失敗した場合、形式エラーのフィードバックを付けて
-        再生成する（最大3回。崩れたら再生成）。
+        盲検化のため task_prompt に条件情報を含めないこと。
+        5軸スコアJSONの抽出に失敗した場合、形式エラーのフィードバックを付けて
+        再生成する（最大3回。崩れたら再生成）。品質評価が統合されているときは、
+        5軸評価に加えて品質評価（新奇度・独自性・意外性）を呼び、overall を掛け算する。
         """
         system = (
             "あなたは成果物の評価者です。提示された成果物を、所定のルーブリックに従い"
@@ -167,12 +203,17 @@ class EvaluationEngine:
                 f"5軸スコアの抽出が{MAX_EVALUATION_RETRIES}回連続で失敗（再生成済み）: {last_err}"
             )
         overall = compute_overall(scores, self.weights)
+        quality_result = None
+        if self.quality_evaluator is not None:
+            quality_result = self.quality_evaluator.evaluate(artifact, task_prompt)
+            overall *= QUALITY_ALPHA + (1.0 - QUALITY_ALPHA) * quality_result.average
         return EvaluationResult(
             scores=scores,
             overall=overall,
             pass_threshold=self.pass_threshold,
             rationale=raw,
             raw=raw,
+            quality=quality_result,
         )
 
     def score_judgment(self, overall: float) -> str:

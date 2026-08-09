@@ -78,4 +78,4 @@ python main.py improve "<タスク>" --rounds 5 --evaluate --out examples/<sampl
 
 `--evaluate` を付けると各ラウンドの昇華版を採点し、改善が頭打ち
 （overall の改善 < `--min-improve`）または高品位停止しきい値
-（overall ≥ `--quality-ceiling`、既定 0.85）で早期停止する。
+（overall ≥ `--quality-ceiling`、既定 0.75）で早期停止する。
