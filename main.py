@@ -656,7 +656,7 @@ def _save_evaluation_record(path: Path, label: str, result, evaluator) -> None:
     quality = getattr(result, "quality", None)
     if quality is not None:
         lines.extend([
-            "- 品質評価（高いほど良い）:",
+            "- 品質評価:",
             f"  - 新奇度: {quality.novelty:.2f}",
             f"  - 独自性: {quality.originality:.2f}",
             f"  - 意外性: {quality.surprise:.2f}",

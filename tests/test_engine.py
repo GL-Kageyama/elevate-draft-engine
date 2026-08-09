@@ -122,6 +122,46 @@ def test_generate_is_instruction_only_with_no_system_prompt() -> None:
     assert out
 
 
+def test_generate_regenerates_when_contaminated_by_facade_skill() -> None:
+    """素の生成がグローバル skill（elevate-draft-engine ファサード）に汚染されたら再生成する。
+
+    2026-08-09 実測: press-release の素の生成が「了解しました。**Elevate-Draft-Engine** を起動します。」
+    というファサード skill の起動文言を出力した。完全性ガードの is_complete が汚染を不完全扱いして
+    再生成し、汚染された出力を評価に渡さない。
+    """
+
+    class ContaminatedGenerator:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def generate(self, system, user, *, temperature=None):
+            self.calls += 1
+            if self.calls == 1:
+                return "了解しました。**Elevate-Draft-Engine** を起動します。まずエンジンの場所を特定します。。"
+            return (
+                "これは与えられたタスクに対する完全な分析である。"
+                "対象の本質は単一の観点では捉えきれず、複数の視点を止揚する統合的枠組みが必須である。"
+                "以上を踏まえ、実行への手がかりを伴う結論を提示した。"
+            )
+
+    client = ContaminatedGenerator()
+    engine = DraftEngine(client)
+    out = engine.generate("タスク")
+    assert client.calls == 2  # 1回目は汚染で再生成
+    assert "Elevate-Draft-Engine" not in out
+    assert "起動します" not in out
+
+
+def test_facade_contamination_detector() -> None:
+    """汚染検出: ファサード skill の起動文言シグネチャを判定する。"""
+    from elevate.engine import _is_facade_contamination
+
+    assert _is_facade_contamination("了解しました。**Elevate-Draft-Engine** を起動します。。")
+    assert _is_facade_contamination("まずエンジンの場所を特定します。。")
+    assert not _is_facade_contamination("これはリサイクル素材スニーカーのプレスリリースである。")
+    assert not _is_facade_contamination("")
+
+
 # ---- エージェント管理 ----
 
 def test_list_agents_defaults_to_eight_creator_agents() -> None:

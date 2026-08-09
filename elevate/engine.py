@@ -403,6 +403,22 @@ def _baseline_is_complete(text: str, fmt: OutputFormat | None = None) -> bool:
     return stripped.endswith(_SYNTHESIS_TERMINAL_MARKERS)
 
 
+def _is_facade_contamination(text: str) -> bool:
+    """素の生成がグローバル skill（elevate-draft-engine ファサード）に乗っ取られたかを判定する。
+
+    2026-08-09 実測: press-release の素の生成が「了解しました。**Elevate-Draft-Engine** を起動します。」
+    というファサード skill の起動文言を出力し、プレスリリース本体を書かなかった。素の生成は cwd を
+    中性ディレクトリにしているが、グローバル skill（~/.claude/skills/）は cwd に関わらず読み込まれる
+    ため防げない。出力が skill 起動文言の決定的シグネチャを含んでいたら汚染とみなし、完全性ガードが
+    再生成する。
+    """
+    if not text:
+        return False
+    if "エンジンの場所を特定します" in text:
+        return True
+    return "Elevate-Draft-Engine" in text and "起動します" in text
+
+
 # ---- 出力フォーマット（LLM による動的抽出） ----
 #
 # パイプラインは従来、出力形式を「分析レポート（テーゼ草案 → TVRO 最終化）」に固定していた。
@@ -820,13 +836,22 @@ class DraftEngine:
             task_for_model = (
                 f"{task_for_model}\n\n【このタスクの最終成果物形式】\n{fmt.finalize_guidance}"
             )
-        is_complete = (
-            (lambda text: _baseline_is_complete(text, fmt)) if fmt is not None
-            else _synthesis_is_complete  # fmt なし = 従来どおり文終端のみ（後方互換）
-        )
+        def _raw_is_complete(text: str) -> bool:
+            if _is_facade_contamination(text):
+                print(
+                    "⚠ 素の生成がグローバル skill（elevate-draft-engine ファサード）に汚染されました。"
+                    "再生成します。",
+                    file=sys.stderr,
+                )
+                return False
+            return (
+                _baseline_is_complete(text, fmt) if fmt is not None
+                else _synthesis_is_complete  # fmt なし = 従来どおり文終端のみ（後方互換）
+            )
+
         return _generate_with_completeness_guard(
             self.client, "", task_for_model, label="素の生成",
-            is_complete=is_complete, sink=sink,
+            is_complete=_raw_is_complete, sink=sink,
         )
 
     # ---- エージェント管理 ----
