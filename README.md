@@ -1,5 +1,9 @@
 # elevate-draft-engine
 
+<p align="center">
+  <img src="assets/repo-icon.png" width="160" alt="elevate-draft-engine アイコン">
+</p>
+
 **複数のAIがそれぞれ別の視点から書いた答えをぶつけ合って、どの単一の視点にもない一段高い答えを生むエンジン。**
 
 AIが一発で出す「平均的な良い答え」を超えるために、**DIVERGE（発散）→ SYNTHESIZE（昇華）** の2段構えを取る。
