@@ -1,7 +1,7 @@
 # elevate-draft-engine
 
 <p align="center">
-  <img src="assets/repo-icon.png" width="160" alt="elevate-draft-engine アイコン">
+  <img src="assets/repo-hero.png" width="100%" alt="elevate-draft-engine">
 </p>
 
 **複数のAIがそれぞれ別の視点から書いた答えをぶつけ合って、どの単一の視点にもない一段高い答えを生むエンジン。**
