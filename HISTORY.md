@@ -1,5 +1,57 @@
 # 開発履歴
 
+## 実測記録（2026-08-11）— 素AI比較・複数ループ・知識注入の多言語実検証
+
+前節（i18n 完了）の残タスクとして、en/ja/zh の3言語で**実API検証**を完遂した（mock ではなくゲートウェイ実呼び出し）。結果はすべて `examples/i18n/` に保存済み。
+
+### 素AI比較（compare --evaluate --runs 1）— ELEVATE が全言語で素の生成を上回る
+
+タスク「朝のルーティーン設計」を3言語で実生成し、素の単発生成 vs 昇華（弁証法的止揚）を5軸+品質評価で比較。
+
+| 言語 | 素の生成 | ELEVATE | 差 | 素の生成の品質 | ELEVATE の品質 |
+|---|---|---|---|---|---|
+| ja | 0.221（⚠定番） | 0.462 | **+0.241** | 新奇0.10/独自0.20/意外0.10 | 新奇0.60/独自0.70/意外0.50 |
+| en | 0.203（⚠generic） | 0.450 | **+0.247** | 0.15/0.15/0.10 | 0.30/0.70/0.40 |
+| zh | 0.292（⚠定番） | 0.597 | **+0.305** | 0.20/0.20/0.20 | 0.80/0.70/0.60 |
+
+- 全言語で ELEVATE が **+0.24〜+0.31** 上回り、素の生成はすべて「定番/generic」、ELEVATE は「独自概念（threshold act・夜慣性・主权回归・少而准 等）を伴う差別化」判定。
+- 生成物は `examples/i18n/morning-compare-{en,ja,zh}/` に保存（input/format/drafts/artifacts/{raw,elevated,reconciliation}.md）。
+- `--runs 1` は統合レポート（compare_report.md / measurement.md）を保存しない仕様のため、スコアは本節に記録した。
+
+### ベースライン安全弁の欠如を修正（素の生成の完全性ガード）
+
+初回実測で **en・zh の compare が落ちた**（ja のみ成功）: 素の生成が抽出フォーマットの max（en 2500 / zh 1500）を超える過長出力（en 5041字 / zh 2870字）を出し、`_baseline_is_complete` の出力量過多判定が不完全扱い → temperature 0.0（決定論的）で3回とも同一失敗 → RuntimeError で compare 全体が中断。
+
+- 自己矛盾仕様の安全弁（`fallback_is_complete`）が **昇華側にのみあり、素の生成側に欠如** していた不整合が根本原因（en/zh は max 1500〜2500 なのに finalize_guidance が詳細な多節構成を要求＝実質達成不能）。
+- 修正: `elevate/engine.py` の `Engine.generate` に `_raw_fallback_is_complete` を追加。汚染出力は安全弁でも拒否（汚染保護を弱めない）・fmt の output_is_direct は尊重・文終端で受容する。昇華側と対称に、上限回数試行後に構造的完成出力を安全弁で受容して続行する。
+- 回帰テスト `test_generate_baseline_safety_valve_accepts_overmax_complete` 追加（過長だが完成 → 受容 / 汚染+過長 → 明示的失敗）。テスト **242 件パス**。
+- 修正後、en/zh compare は exit 0 で完走（素の生成・最終分析とも安全弁「受け入れて続行」が動作）。
+- **en の storyteller 草案は初回・再実行とも失敗・スキップ**（草案ガードの1000字上限超過。per-agent 捕捉の設計どおりで、他3エージェントの弁証法は継続して完走）。
+
+### 複数ループ（improve）の多言語実検証
+
+`morning-improve-{en,ja,zh}/` に保存。高品位停止（--quality-ceiling 既定0.85・既定有効）の多言語動作を確認。
+
+| 言語 | round1 | round2 | 改善 | 結果 |
+|---|---|---|---|---|
+| ja | 0.593 | 0.622 | **+0.030** | 改善、継続 |
+| en | 0.647 | 0.451 | -0.196 | 早期停止（回帰を防ぐ） |
+| zh | 0.711 | 0.675 | -0.036 | 早期停止（回帰を防ぐ） |
+
+### 知識注入の多言語実検証
+
+`tagline-{en,ja,zh}/` に保存。キャッチコピー「履くたび、海が軽くなる。」/ "Maru: Every step returns to the sea." / 「海跑成圆。」— 前提知識（再生PET・環境負荷70%削減・20〜30代都市部）を捏造なく反映し、形式検出も言語適応（ja: コピー+選定理由200-800字 / en: 単行タグライン10-200字 / zh: 標語+理由）。
+
+### 行列統合のための改修（--runs 1 の測定・評価記録保存）
+
+ユーザー指示（2026-08-11）「評価ファイルも保存」「多言語 compare を行列に統合」に応え、単一 run でも記録を残すようにした。
+
+- **main.py**: `--runs 1 --evaluate --out` でも (1) `evaluations/evaluation_baseline.md`・`evaluation_elevated.md` を保存、(2) `measurement.md` を保存する。n=1 は 95%CI・効果量が意味を持たないため省略し「n=1（単一 run）のため 95%CI・効果量は省略。」を注記（locales/ 3言語に `measurement_single_run_note` 追加）。
+- **check_matrix_progress.py**: measurement.md の差/勝率ラベルを ja/en/zh の3言語でパース（言語別ラベル対応）、走査範囲を `examples/i18n/*/measurement.md` に拡張。
+- **行列の再登録（2026-08-11）**: ユーザー承認により en/ja/zh の morning-routine（各 n=1）を行列に統合。累積勝率・平均差のみで規則を適用（n=1 のため CI は使わない。独立run前提の統計とは別物）。再実行後の最終測定: ja +0.334 / en +0.312 / zh +0.367、**累積勝率 100%・平均差 +0.338 → 継続判定**（打ち切りにならない）。
+- テスト: 246 件パス（`pytest tests/`）。回帰テスト `test_compare_single_run_saves_evaluations_and_measurement` + `test_matrix_progress.py`（多言語ラベル・i18n 走査・継続判定）を追加。
+
+
 ## i18n 多言語化完了（2026-08-10）— en/ja/zh で全機能を回す
 
 `資料/多言語化ver2/elevate-draft-engine-i18n-plan.md`（ver2 計画）を実施し、en/ja/zh の3言語対応を完了した。

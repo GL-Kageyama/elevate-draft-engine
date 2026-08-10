@@ -146,7 +146,7 @@ Aufheber 承担。
 
 ```bash
 python -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/python -m pytest tests/ -q     # 241 个测试
+.venv/bin/python -m pytest tests/ -q     # 246 个测试
 
 # 无需 API 的 mock，一口气确认流水线
 .venv/bin/python main.py compare "健康AI产品策划" --mock --evaluate
@@ -282,7 +282,7 @@ elevate-draft-engine/
 │   └── quality.py              # 质量评估的 3 个观点（新奇度・独创性・意外性）
 ├── skills/
 │   └── elevate-draft-engine/SKILL.md   # 门面 skill（启动 main.py。编排委托给引擎）
-├── tests/                      # 241 个测试
+├── tests/                      # 246 个测试
 ├── examples/                   # 执行样本集（跨领域测试用例等）
 │   └── multi-domain/           # 跨领域格式识别+知识注入的验证用例
 ├── docs/                       # 深掘详解（output-format / knowledge / measurement / api）

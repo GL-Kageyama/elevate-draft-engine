@@ -85,6 +85,7 @@
     "measurement_cohens_d": "  - Effect size (Cohen's d): {d:+.2f}",
     "measurement_cumulative_note": "- Note: run_02+ uses accumulative mode (revision chain: drafts revising the previous elevated artifact → elevation).",
     "measurement_cumulative_note2": "  The baseline is re-measured each run from the original task in a single call. This differs from statistics assuming independent runs.",
+    "measurement_single_run_note": "  - n=1 (single run): 95% CI and effect size omitted.",
     "measurement_run_note": "- Each run's artifacts and evaluation records are saved under `run_NN/`.",
     "measurement_discovery": "\n> Wisdom Council insight (discovery_target): prove elevation advantage empirically with n≥10. Disclosing tasks where the win rate falls below 50% is the honest claim.",
     "best_of_n_requires_evaluate": "--baseline best-of-n evaluates drafts to pick the best, so --evaluate is required"

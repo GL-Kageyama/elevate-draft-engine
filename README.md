@@ -128,7 +128,7 @@ A file with no suffix placed directly under `agents/` is treated as **en** (to w
 
 ```bash
 python -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/python -m pytest tests/ -q     # 241 tests
+.venv/bin/python -m pytest tests/ -q     # 246 tests
 
 # Check the pipeline end-to-end with a mock (no API needed)
 .venv/bin/python main.py compare "Design a health-AI product" --mock --evaluate
@@ -242,7 +242,7 @@ elevate-draft-engine/
 │   └── quality.py              # quality evaluation's 3 viewpoints (novelty / originality / surprise)
 ├── skills/
 │   └── elevate-draft-engine/SKILL.md   # facade skill (launches main.py; orchestration is delegated)
-├── tests/                      # 241 tests
+├── tests/                      # 246 tests
 ├── examples/                   # execution samples (cross-domain test cases, etc.)
 │   └── multi-domain/           # cross-domain format-detection + knowledge-injection verification cases
 ├── docs/                       # deep-dive details (output-format / knowledge / measurement / api)

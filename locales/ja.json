@@ -85,6 +85,7 @@
     "measurement_cohens_d": "  - 効果量（Cohen's d）: {d:+.2f}",
     "measurement_cumulative_note": "- 注: run_02+ は累積モード（前回の昇華版を改修した草案→昇華の改善連鎖）で測定。",
     "measurement_cumulative_note2": "  ベースラインは毎回オリジナルタスクからの単発生成。独立run前提の統計とは別物。",
+    "measurement_single_run_note": "  - n=1（単一 run）のため 95%CI・効果量は省略。",
     "measurement_run_note": "- 各 run の成果物・評価記録は `run_NN/` に保存。",
     "measurement_discovery": "\n> 知恵の評議会の指摘（discovery_target）: 昇華優位性は n≥10 の実測で立証せよ。勝率が 50% を下回るタスクの開示こそが誠実な主張になる。",
     "best_of_n_requires_evaluate": "--baseline best-of-n は草案を評価して最良を選ぶため、--evaluate が必要です"

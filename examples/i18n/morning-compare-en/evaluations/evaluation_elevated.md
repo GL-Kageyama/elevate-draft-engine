@@ -1,0 +1,14 @@
+## ELEVATE
+- overall: 0.561 (Revise)
+- Scores:
+  - diversity: 0.75
+  - synthesis: 0.85
+  - elevation: 0.80
+  - honesty: 0.55
+  - utility: 0.85
+- Rationale: {"diversity":0.75,"synthesis":0.85,"elevation":0.8,"honesty":0.55,"utility":0.85}
+- Quality:
+  - novelty: 0.62
+  - originality: 0.75
+  - surprise: 0.58
+  - rationale: The routine includes familiar pillars (hydration, sunlight, journaling, no-phone buffer, one priority) but reframes them through distinctive concepts such as 'No-Input Threshold,' naming the day's character, 'one aim and one refusal,' and 'the Day's Proper' as a liturgical metaphor. This gives it a conceptual framework absent from typical morning-routine advice and adds mild surprise via terms like 'kairos' and the idea that the day can be colonized by external input. The departure is meaningful but not radical, since the underlying activities remain conventional.

@@ -971,9 +971,21 @@ class DraftEngine:
                 else _synthesis_is_complete  # fmt なし = 従来どおり文終端のみ（後方互換）
             )
 
+        def _raw_fallback_is_complete(text: str) -> bool:
+            # 安全弁: fmt の上限と矛盾する自己矛盾仕様（例: 抽出 max 2500 なのに
+            # finalize_guidance が詳細な5節構成を要求 → 過長出力が決定論的に再現）でも、
+            # 構造的に完成した最後の出力を受け入れる。昇華側（_synthesis_is_complete）
+            # と対称だが、汚染は安全弁でも受け入れない（再生成する）。
+            if _is_facade_contamination(text):
+                return False
+            if fmt is not None and fmt.output_is_direct:
+                return True
+            return _synthesis_is_complete(text)
+
         return _generate_with_completeness_guard(
             self.client, "", task_for_model, label="素の生成",
             is_complete=_raw_is_complete, sink=sink,
+            fallback_is_complete=_raw_fallback_is_complete if fmt is not None else None,
         )
 
     # ---- エージェント管理 ----

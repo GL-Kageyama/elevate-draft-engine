@@ -1,0 +1,14 @@
+## Raw generation (single call)
+- overall: 0.248 (Regenerate)
+- Scores:
+  - diversity: 0.75
+  - synthesis: 0.70
+  - elevation: 0.60
+  - honesty: 0.65
+  - utility: 0.85
+- Rationale: {"diversity": 0.75, "synthesis": 0.7, "elevation": 0.6, "honesty": 0.65, "utility": 0.85}
+- Quality:
+  - novelty: 0.15
+  - originality: 0.15
+  - surprise: 0.10
+  - rationale: The artifact follows the conventional morning-routine formula almost exactly (water, light, meditation, exercise, priority-setting, breakfast), with no novel framework, neologism, or unexpected twist. It is a competent but generic list.

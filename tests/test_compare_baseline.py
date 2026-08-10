@@ -246,6 +246,25 @@ def test_compare_single_run_out_flat(tmp_path) -> None:
     assert not list(tmp_path.glob("run_*")), "--runs 1 で run_* フォルダを作らない"
 
 
+def test_compare_single_run_saves_evaluations_and_measurement(tmp_path) -> None:
+    """--runs 1 でも評価記録（evaluations/）と測定記録（measurement.md）を保存する。
+
+    行列統合・再現性のため（ユーザー指示 2026-08-11）。n=1 は 95%CI・効果量を省略し、
+    単一 run である旨を注記する（Wilson/t 区間が n=1 で意味を持たないため）。
+    """
+    code, _ = _run_compare(
+        ["compare", "タスク", "--mock", "--evaluate", "--runs", "1", "--out", str(tmp_path)]
+    )
+    assert code == 0
+    assert (tmp_path / "evaluations" / "evaluation_baseline.md").exists()
+    assert (tmp_path / "evaluations" / "evaluation_elevated.md").exists()
+    md = (tmp_path / "measurement.md").read_text()
+    assert "勝率（ELEVATE > ベースライン）: " in md
+    assert "n=1（単一 run）のため 95%CI・効果量は省略" in md
+    assert "95%CI（Wilson）" not in md
+    assert "Cohen's d" not in md
+
+
 def test_compare_runs_cumulative_from_second_run(tmp_path) -> None:
     """run_02 以降は累積モード: 前回の昇華版を改修する草案（改訂草案）を書く。
 

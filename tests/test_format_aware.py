@@ -472,6 +472,51 @@ def test_generate_without_fmt_keeps_baseline_unchanged() -> None:
     assert client.calls[0][1] == "タスク"
 
 
+def test_generate_baseline_safety_valve_accepts_overmax_complete(capsys) -> None:
+    """素の生成（compare のベースライン）も fmt 自己矛盾では安全弁で受け入れる。
+
+    昇華側には fallback_is_complete があるが素の生成側には無く、抽出フォーマットの
+    max（例: 2500）を超える過長出力が temperature 0.0 で決定論的に3回再現すると
+    RuntimeError で落ちていた（en compare 実測: "素の生成が3回連続で打ち切り/不完全"）。
+    自己矛盾仕様（過長要求の finalize_guidance）では、構造的に完成した最後の試行を
+    安全弁で受け入れて続行する。汚染出力は安全弁でも弾く。
+    """
+
+    class _OverMaxBaseline:
+        """fmt.max を超えるが文終端で終わる素の生成を返す（決定論的・3回とも同一）。"""
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def generate(self, system: str, user: str, *, temperature=None, on_chunk=None) -> str:
+            self.calls += 1
+            return "詳細な分析の節が続く。" * 250 + "まとめ。"  # max 2500 超過、文終端あり
+
+    class _ContaminatedOverMaxBaseline:
+        """過長かつファサード汚染の素の生成を返す（安全弁で受け入れない確認用）。"""
+
+        def generate(self, system: str, user: str, *, temperature=None, on_chunk=None) -> str:
+            return "詳細な分析の節が続く。" * 250 + "まとめ。\n了解しました。**Elevate-Draft-Engine** を起動します。"
+
+    fmt = OutputFormat(
+        deliverable_type="分析レポート", description="",
+        draft_guidance="", finalize_guidance="5つの節で詳細に構成せよ。",
+        min_output_length=10, max_output_length=2500, output_is_direct=False,
+    )
+
+    # 過長だが構造的完成 → 安全弁で受け入れ、RuntimeError にしない
+    client = _OverMaxBaseline()
+    engine = DraftEngine(client)
+    out = engine.generate("タスク", fmt=fmt)
+    assert out.endswith("。")
+    assert client.calls == 3  # 再生成は上限まで試みられた
+    assert "受け入れて続行" in capsys.readouterr().err
+
+    # 汚染した過長出力は安全弁でも弾いて明示的失敗する（汚染保護を弱めない）
+    with pytest.raises(RuntimeError, match="打ち切り/不完全"):
+        DraftEngine(_ContaminatedOverMaxBaseline()).generate("タスク", fmt=fmt)
+
+
 # ---- CLI 結合（--output-format で抽出を明示指定） ----
 #
 # mock は抽出をスキップする（決定的な挙動を保つ）ため、CLI 統合テストでは

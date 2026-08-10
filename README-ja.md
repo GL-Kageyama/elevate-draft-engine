@@ -147,7 +147,7 @@ Aufheber が引き受ける。
 
 ```bash
 python -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/python -m pytest tests/ -q     # 241件
+.venv/bin/python -m pytest tests/ -q     # 246件
 
 # API 不要のモックでパイプライン確認
 .venv/bin/python main.py compare "健康AIの企画" --mock --evaluate
@@ -283,7 +283,7 @@ elevate-draft-engine/
 │   └── quality.py              # 品質評価の3観点（新奇度・独自性・意外性）
 ├── skills/
 │   └── elevate-draft-engine/SKILL.md   # ファサード skill（main.py を起動。オーケストレーションは委譲）
-├── tests/                      # 241件
+├── tests/                      # 246件
 ├── examples/                   # 実行サンプル集（分野横断テストケース等）
 │   └── multi-domain/           # 分野横断フォーマット認識+知識注入の検証ケース
 ├── docs/                       # 深掘り詳細（output-format / knowledge / measurement / api）

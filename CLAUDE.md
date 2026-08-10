@@ -25,7 +25,7 @@ README / SKILL / examples/README must contain **only current information**. Curr
 
 ## Tests
 
-Run all tests with `pytest tests/`. 241 tests.
+Run all tests with `pytest tests/`. 246 tests.
 
 ## Things that must not be broken
 

@@ -858,10 +858,11 @@ def cmd_compare(args: argparse.Namespace) -> None:
     for run_idx in range(runs):
         run_num = run_idx + 1
         # --runs > 1 のとき、各 run の成果物を run_NN/ サブフォルダに分離して保存する
-        # （runごとに上書きしない履歴として残す）。--runs 1 は従来どおり --out 直下へ。
+        # （runごとに上書きしない履歴として残す）。--runs 1 は従来どおり --out 直下へ
+        # （評価記録 evaluations/ も --out 直下へ保存する）。
         run_dir = None
-        if args.runs > 1 and args.out is not None:
-            run_dir = args.out / f"run_{run_num:02d}"
+        if args.out is not None:
+            run_dir = args.out / f"run_{run_num:02d}" if args.runs > 1 else args.out
         if run_dir is not None:
             run_args = argparse.Namespace(**vars(args))
             run_args.out = run_dir
@@ -994,6 +995,13 @@ def cmd_compare(args: argparse.Namespace) -> None:
                 args.out, baseline_label, baseline_scores, elevated_scores, wins, runs,
                 preservation_rates=preservation_rates, lang=lang,
             )
+    elif args.evaluate and args.out is not None:
+        # 単一 run（--runs 1）でも測定記録を保存する（行列統合・再現性のため）。
+        # n=1 は 95%CI・効果量が意味を持たないため _save_measurement 内で省略する。
+        _save_measurement(
+            args.out, baseline_label, baseline_scores, elevated_scores, wins, runs,
+            preservation_rates=preservation_rates, lang=lang,
+        )
 
 
 def _save_baseline_score_record(path: Path, label: str, overall: float, evaluator, *, lang: str | None = None) -> None:
@@ -1186,13 +1194,14 @@ def _save_measurement(
     preservation_rates: list[float] | None = None,
     lang: str | None = None,
 ) -> None:
-    """比較の統計集計（measurement.md）を --out 直下に保存する。"""
+    """比較の統計集計（measurement.md）を --out 直下に保存する。
+
+    単一 run（n=1）でも保存する（行列統合・再現性のため）。n=1 は 95%CI・効果量が
+    意味を持たないため省略し、その旨を注記する。
+    """
     loc = _loc(lang)
     out.mkdir(parents=True, exist_ok=True)
     diffs = [e - b for b, e in zip(baseline_scores, elevated_scores)]
-    wlo, whi = _wilson_interval(wins, runs)
-    dlo, dhi = _mean_confidence_interval(diffs)
-    d = _cohens_d(baseline_scores, elevated_scores)
     cumulative_note = (
         "\n" + _t(loc, "compare", "measurement_cumulative_note",
                   "- 注: run_02+ は累積モード（前回の昇華版を改修した草案→昇華の改善連鎖）で測定。")
@@ -1200,16 +1209,30 @@ def _save_measurement(
                     "  ベースラインは毎回オリジナルタスクからの単発生成。独立run前提の統計とは別物。")
         + "\n"
     ) if runs > 1 else ""
+    stats_lines = [
+        f"- {baseline_label}: {_stat_summary(baseline_scores)}\n",
+        f"- ELEVATE:            {_stat_summary(elevated_scores)}\n",
+        f"- {_t(loc, 'compare', 'diff_stat', '差（ELEVATE−ベースライン）: {stat}', stat=_stat_summary(diffs))}\n",
+        f"- {_t(loc, 'compare', 'win_rate', '勝率（ELEVATE > ベースライン）: {wins}/{runs} = {rate:.1%}', wins=wins, runs=runs, rate=wins / runs)}\n",
+    ]
+    if runs > 1:
+        wlo, whi = _wilson_interval(wins, runs)
+        dlo, dhi = _mean_confidence_interval(diffs)
+        d = _cohens_d(baseline_scores, elevated_scores)
+        stats_lines += [
+            _t(loc, 'compare', 'measurement_wilson', '  - 勝率 95%CI（Wilson）: {lo:.1%}〜{hi:.1%}', lo=wlo, hi=whi) + "\n",
+            _t(loc, 'compare', 'measurement_diff_ci', '  - 差の 95%CI（t, 両側）: {lo:+.3f}〜{hi:+.3f}', lo=dlo, hi=dhi) + "\n",
+            _t(loc, 'compare', 'measurement_cohens_d', "  - 効果量（Cohen's d）: {d:+.2f}", d=d) + "\n",
+        ]
+    else:
+        stats_lines.append(
+            _t(loc, "compare", "measurement_single_run_note",
+               "  - n=1（単一 run）のため 95%CI・効果量は省略。") + "\n"
+        )
     text = (
         _t(loc, "compare", "measurement_title", "# 比較計測（--runs {runs}）", runs=runs) + "\n\n"
-        f"- {baseline_label}: {_stat_summary(baseline_scores)}\n"
-        f"- ELEVATE:            {_stat_summary(elevated_scores)}\n"
-        f"- {_t(loc, 'compare', 'diff_stat', '差（ELEVATE−ベースライン）: {stat}', stat=_stat_summary(diffs))}\n"
-        f"- {_t(loc, 'compare', 'win_rate', '勝率（ELEVATE > ベースライン）: {wins}/{runs} = {rate:.1%}', wins=wins, runs=runs, rate=wins / runs)}\n"
-        f"{_t(loc, 'compare', 'measurement_wilson', '  - 勝率 95%CI（Wilson）: {lo:.1%}〜{hi:.1%}', lo=wlo, hi=whi)}\n"
-        f"{_t(loc, 'compare', 'measurement_diff_ci', '  - 差の 95%CI（t, 両側）: {lo:+.3f}〜{hi:+.3f}', lo=dlo, hi=dhi)}\n"
-        f"{_t(loc, 'compare', 'measurement_cohens_d', '  - 効果量（Cohen\'s d）: {d:+.2f}', d=d)}\n"
-        f"{cumulative_note}"
+        + "".join(stats_lines)
+        + cumulative_note
     )
     if preservation_rates:
         pmean = sum(preservation_rates) / len(preservation_rates)

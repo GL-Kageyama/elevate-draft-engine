@@ -85,6 +85,7 @@
     "measurement_cohens_d": "  - 效应量（Cohen's d）：{d:+.2f}",
     "measurement_cumulative_note": "- 注：run_02+ 为累积模式（修订上一版升华成果物的草案→升华的改进链）进行测量。",
     "measurement_cumulative_note2": "  基线每次都从原始任务单次生成。与假设独立 run 的统计不同。",
+    "measurement_single_run_note": "  - n=1（单次运行）：省略 95%CI 与效应量。",
     "measurement_run_note": "- 各 run 的成果物与评价记录保存在 `run_NN/`。",
     "measurement_discovery": "\n> 知恵的评议会指摘（discovery_target）：请以 n≥10 的实测来证明升华优势。公开胜率低于 50% 的任务才是诚实的陈述。",
     "best_of_n_requires_evaluate": "--baseline best-of-n 需要评价草案以选出最佳，因此需要 --evaluate"
