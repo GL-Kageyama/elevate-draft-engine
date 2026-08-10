@@ -1,5 +1,14 @@
 # 開発履歴
 
+## 先行多言語化への追いつき（2026-08-11）— SKILL.md・install.sh・エージェント pre-link
+
+ユーザー指示（2026-08-11）「wisdom-council-layer は先行して多言語化している。差分として追いついていない部分を修正して」に応え、`資料/多言語化/claude-code-plugin-i18n-pattern.md` の横展開チェックリストで両リポジトリを照合した。核の i18n（locales/・prompts/・agents/・docs ミラー・--lang 解決・plugin.json languages・較正）は先行側に追いつき済みであることを確認し、**残っていた3差分を修正**した。
+
+- **SKILL.md を英語化＋Language Mode 節を追加**: 本体が日本語中心（ZH 未対応）だったのを英語化し、wisdom-council の SKILL.md と同じ「単一ファイル言語切替」方式に揃えた。`lang` 解決（`$ARGUMENTS.lang` > `ELEVATE_DRAFT_ENGINE_LANG` > `en`）・suffix 対応・`--agents` が言語非依存ベース名であること・**ユーザー向け出力（保存成果物と報告）は要求言語で書く**指示を明記。Prompt 内の Step0 リポジトリ紹介は従来**全ユーザーに日本語ハードコード**だったのを、要求言語で提示する指示に変更。Step5 報告にも要求言語を明記。
+- **install.sh の出力メッセージを英語化**: 完了時 echo（143-146行）の日本語コメント（「ファサード（main.py を起動）」「クリエイターエージェント（サブエージェントとして起動可）」等）を英語化。インストール対象（全24エージェント）は従来どおり言語非依存で全バリアントを扱う。
+- **`.claude/agents/` に -ja/-zh symlink を追加**: 従来 EN 8種のみ pre-link だったのを、wisdom-council（install.sh 再実行で全30種リンク済み）と同様に **24種（8×3）全対応**へ。symlink 解決確認済み（broken 0）。
+- テスト 246 件パス（`pytest tests/`）。SKILL.md / install.sh / symlink は既存テストに依存なし。
+
 ## 実測記録（2026-08-11）— 素AI比較・複数ループ・知識注入の多言語実検証
 
 前節（i18n 完了）の残タスクとして、en/ja/zh の3言語で**実API検証**を完遂した（mock ではなくゲートウェイ実呼び出し）。結果はすべて `examples/i18n/` に保存済み。
