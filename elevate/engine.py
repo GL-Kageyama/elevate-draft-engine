@@ -42,9 +42,24 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Protocol
 
+from . import i18n
+
+# ====================================================================
+# 注記: コード内に残っている日本語プロンプト定数（ANALYSIS_SYSTEM 等）は
+# **すべて「安全弁（フォールバック）」**である。正本は prompts/{lang}.json
+# （i18n ストア）で、DraftEngine は常に言語別ストアを読み込み、生成の全段階に
+# prompts=self.prompts を渡す。したがって通常の実行でこれらの ja 定数が使われる
+# ことはない。使われるのは次のどちらかの場合だけ:
+#   1. ストアにキーが無い（欠損・将来のキー追加漏れ）→ ja で退行しない安全網
+#   2. prompts を渡さない直接の関数呼び出し（API 利用者が省略した場合）
+# 多言語化する際は定数を書き換えるのではなく、prompts/{lang}.json にキーを
+# 足して `_engine_prompt(prompts, "KEY", 定数)` で読むこと（ja 挙動は不変）。
+# ====================================================================
+
 # ---- 素の生成（単発） ----
 # 中立プロンプト: 複数視点を誘引しない（compare のベースライン公平性のため。
-# 誘引すると単発呼び出しが内部で評議会を演じ、ELEVATE との差が測れなくなる）
+# 誘引すると単発呼び出しが内部で評議会を演じ、ELEVATE との差が測れなくなる）。
+# この定数は「ja 実装（後方互換）」。正本は prompts/{lang}.json（i18n ストア）。
 ANALYSIS_SYSTEM = (
     "あなたは独立した分析者です。与えられたテーマを深く分析し、"
     "具体的・深い洞察を伴い、実行への手がかりを持つ分析を示してください。"
@@ -70,21 +85,41 @@ def _parse_agent_file(text: str) -> tuple[dict[str, str], str]:
     return fm, text[m.end():].strip()
 
 
-def load_agents(agents_dir: str | Path | None = None) -> dict[str, str]:
+def load_agents(agents_dir: str | Path | None = None, lang: str | None = None) -> dict[str, str]:
     """agents/*.md から {エージェント名: システムプロンプト} を読み込む。
 
-    エージェント名は frontmatter の name（なければファイル名）。ファイル名順（アルファベット順）。
-    ディレクトリが無い・ファイルが無い場合は空 dict（エージェント0のエンジンとして動く）。
+    lang で言語を選ぶ（en=接尾辞なし / ja=-ja / zh=-zh。既定は i18n の解決）。
+    エージェント名は frontmatter の name（なければファイル名）から接尾辞を剥いた
+    ベース名（strategist 等）で返す——`--agents` 指定を言語非依存にするため。
+    ファイル名順（アルファベット順）。ディレクトリが無い・ファイルが無い場合は空 dict。
     """
     d = Path(agents_dir) if agents_dir else DEFAULT_AGENTS_DIR
+    lang = i18n.resolve_lang(lang)
+    suffix = "" if lang == "en" else f"-{lang}"
     result: dict[str, str] = {}
+    bare: dict[str, str] = {}  # 接尾辞なしファイル（ja 旧命名）。{lang} 対応が無ければフォールバック
     if not d.is_dir():
         return result
     for path in sorted(d.glob("*.md")):
+        stem = path.stem
         fm, body = _parse_agent_file(path.read_text())
-        name = fm.get("name") or path.stem
-        if body:
-            result[name] = body
+        name = (fm.get("name") or stem).strip()
+        if lang == "en":
+            if stem.endswith("-ja") or stem.endswith("-zh"):
+                continue
+            if body:
+                result[name] = body
+        elif stem.endswith(suffix):
+            if name.endswith(suffix):
+                name = name[: -len(suffix)]
+            if body:
+                result[name] = body
+        elif not (stem.endswith("-ja") or stem.endswith("-zh")):
+            # 接尾辞なし = ja 旧命名。{lang} 対応ファイルが無い場合のフォールバック
+            if body:
+                bare[name] = body
+    if lang != "en" and not result and bare:
+        return bare
     return result
 
 
@@ -219,12 +254,18 @@ _CLICHE_EMOTION_PATTERNS = (
 )
 
 
-def _sentimentality_detail(text: str) -> dict[str, bool]:
-    """型通りの感情定式（泣かせ定式）の各要素を検出する（soft guard の詳細）。"""
-    terminal = any(p in text for p in _TERMINAL_PATTERNS)
-    elderly = any(p in text for p in _ELDER_PATTERNS)
-    abandonment = any(p in text for p in _ABANDON_PATTERNS)
-    cliche = any(p in text for p in _CLICHE_EMOTION_PATTERNS)
+def _sentimentality_detail(text: str, lang: str | None = None) -> dict[str, bool]:
+    """型通りの感情定式（泣かせ定式）の各要素を検出する（soft guard の詳細）。
+
+    パターンは prompts/{lang}.json の MARKERS から言語ごとに取得する。
+    lang 未指定は i18n 解決（既定 en、conftest の env 指定で ja）。定数は後方互換の既定。
+    """
+    resolved = i18n.resolve_lang(lang)
+    mk = i18n.load_prompts(resolved)["engine"].get("MARKERS", {})
+    terminal = any(p in text for p in mk.get("sentimentality_terminal", _TERMINAL_PATTERNS))
+    elderly = any(p in text for p in mk.get("sentimentality_elder", _ELDER_PATTERNS))
+    abandonment = any(p in text for p in mk.get("sentimentality_abandon", _ABANDON_PATTERNS))
+    cliche = any(p in text for p in mk.get("sentimentality_cliche", _CLICHE_EMOTION_PATTERNS))
     return {
         "terminal_illness": terminal,
         "elderly": elderly,
@@ -235,9 +276,9 @@ def _sentimentality_detail(text: str) -> dict[str, bool]:
     }
 
 
-def _detect_sentimentality(text: str) -> bool:
+def _detect_sentimentality(text: str, lang: str | None = None) -> bool:
     """型通りの感情定式かどうか（soft guard）。検出しても再生成はしない。"""
-    d = _sentimentality_detail(text)
+    d = _sentimentality_detail(text, lang)
     return d["trope"] or d["cliche_emotion"]
 
 
@@ -263,12 +304,17 @@ _CREATIVE_TASK_KEYWORDS = (
 )
 
 
-def _is_creative_task(task: str) -> bool:
+def _is_creative_task(task: str, lang: str | None = None) -> bool:
     """創作系タスクか（歌詞・小説・物語・コピー等、作品が長くなりうるジャンル）を判定する。
 
     真なら草案上限を DRAFT_MAX_LENGTH_CREATIVE に緩める（散文のテーゼ集中上限とは別枠）。
+    キーワードは prompts/{lang}.json の MARKERS.creative_keywords（lang 未指定は i18n 解決）。
     """
-    return any(k in task for k in _CREATIVE_TASK_KEYWORDS)
+    resolved = i18n.resolve_lang(lang)
+    keywords = i18n.load_prompts(resolved)["engine"].get("MARKERS", {}).get(
+        "creative_keywords", _CREATIVE_TASK_KEYWORDS
+    )
+    return any(k in task for k in keywords)
 
 # 最終成果物（elevated）のサイズ制約。草案のテーゼ集中化と同じく、結論もコンパクトで
 # なければならない（実測: 草案が500〜800字に収まっても elevated が7000字級のまま残る）。
@@ -489,25 +535,49 @@ EXTRACT_FORMAT_PROMPT = (
 _format_cache: dict[str, OutputFormat] = {}
 
 
-def extract_format(generator: Generator, task: str) -> OutputFormat:
+def _localized_analytical(prompts: dict) -> OutputFormat:
+    """抽出失敗時のフォールバック（分析レポート）を言語ごとに組み立てる。
+
+    各フィールドが既存の定数（FORMAT_ANALYTICAL）と一致するため、ja では従来挙動と同一。
+    """
+    ep = prompts.get("engine", {})
+    return OutputFormat(
+        deliverable_type=ep.get("FORMAT_ANALYTICAL_TYPE", "分析レポート"),
+        description=ep.get("FORMAT_ANALYTICAL_DESCRIPTION", "複数の視点を昇華した、超越的で具体的な分析。"),
+        draft_guidance="",  # 空 → 既存のテーゼ形式（核心的主張/根拠/前提）に従う
+        finalize_guidance=ep.get("FINALIZE_INSTRUCTION", FINALIZE_INSTRUCTION),  # TVRO
+        min_output_length=ELEVATED_MIN_LENGTH,
+        max_output_length=ELEVATED_MAX_LENGTH,
+        output_is_direct=False,
+    )
+
+
+def extract_format(generator: Generator, task: str, *, lang: str | None = None) -> OutputFormat:
     """タスクから期待される出力形式を LLM で動的に抽出する。
 
     1 回の軽量 LLM 呼び出しで JSON を返させ、OutputFormat に変換する。
-    呼び出し失敗・JSON パース失敗・不正な値は FORMAT_ANALYTICAL（既存挙動）に
-    フォールバックする——劣化ではなく安全側への退避。
-    同一タスクはハッシュでメモ化し、再抽出を避ける。
+    呼び出し失敗・JSON パース失敗・不正な値はローカライズ版 FORMAT_ANALYTICAL
+    （既存挙動の言語化）にフォールバックする——劣化ではなく安全側への退避。
+    同一タスクは「言語+タスク」のハッシュでメモ化し、再抽出を避ける。
     """
     import hashlib
     import json
 
-    key = hashlib.sha256(task.encode("utf-8")).hexdigest()
+    resolved = i18n.resolve_lang(lang)
+    prompts = i18n.load_prompts(resolved)
+    ep = prompts.get("engine", {})
+    fallback = _localized_analytical(prompts)
+
+    key = f"{resolved}:{hashlib.sha256(task.encode('utf-8')).hexdigest()}"
     if key in _format_cache:
         return _format_cache[key]
 
-    fmt = FORMAT_ANALYTICAL
+    fmt = fallback
     try:
         raw = generator.generate(
-            EXTRACT_FORMAT_SYSTEM, EXTRACT_FORMAT_PROMPT.format(task=task), temperature=0.0
+            ep.get("EXTRACT_FORMAT_SYSTEM", EXTRACT_FORMAT_SYSTEM),
+            ep.get("EXTRACT_FORMAT_PROMPT", EXTRACT_FORMAT_PROMPT).format(task=task),
+            temperature=0.0,
         )
         data = json.loads(raw)
         lo = int(data.get("min_output_length", ELEVATED_MIN_LENGTH))
@@ -515,16 +585,16 @@ def extract_format(generator: Generator, task: str) -> OutputFormat:
         if lo < 1 or hi < lo or hi > 100_000:
             raise ValueError("不正な長さ範囲")
         fmt = OutputFormat(
-            deliverable_type=str(data.get("deliverable_type") or "成果物"),
+            deliverable_type=str(data.get("deliverable_type") or fallback.deliverable_type),
             description=str(data.get("description") or ""),
             draft_guidance=str(data.get("draft_guidance") or ""),
-            finalize_guidance=str(data.get("finalize_guidance") or FINALIZE_INSTRUCTION),
+            finalize_guidance=str(data.get("finalize_guidance") or fallback.finalize_guidance),
             min_output_length=lo,
             max_output_length=hi,
             output_is_direct=_json_bool(data.get("output_is_direct"), False),
         )
     except Exception:
-        fmt = FORMAT_ANALYTICAL
+        fmt = fallback
     _format_cache[key] = fmt
     return fmt
 
@@ -606,20 +676,25 @@ def _generate_with_completeness_guard(
 
 
 def _generate_synthesis(generator: Generator, synthesis_user: str, *, sink: Path | None = None,
-                        fmt: OutputFormat | None = None) -> str:
+                        fmt: OutputFormat | None = None, prompts: dict | None = None) -> str:
     """単発昇華（method="single-pass"）を生成する。打ち切りは再生成し、直らない場合は明示的に失敗させる。
 
     sink が与えられたら、生成前に空ファイルを作り、生成中に逐次追記する（草案と同じ）。
     fmt が渡されたら、そのフォーマット固有の長さ範囲で完全性を判定する（タスクに応じたサイズ）。
+    prompts が渡されたら、その言語の system プロンプトを使う（無ければ ja 定数）。
     """
+    system = _engine_prompt(prompts, "ANALYSIS_SYSTEM", ANALYSIS_SYSTEM) + _engine_prompt(
+        prompts, "SYNTHESIS_SYSTEM", SYNTHESIS_SYSTEM
+    )
     return _generate_with_completeness_guard(
-        generator, ANALYSIS_SYSTEM + SYNTHESIS_SYSTEM, synthesis_user, label="昇華生成",
+        generator, system, synthesis_user, label="昇華生成",
         is_complete=lambda text: _elevated_is_complete(text, fmt), sink=sink,
         fallback_is_complete=_synthesis_is_complete if fmt is not None else None,
     )
 
 
-def _generate_aufheben(generator: Generator, aufheben_user: str, *, temperature: float, sink: Path | None = None) -> str:
+def _generate_aufheben(generator: Generator, aufheben_user: str, *, temperature: float,
+                       sink: Path | None = None, prompts: dict | None = None) -> str:
     """止揚（アウフヘーベン）を生成する。極端に短い（放棄した）出力は再生成。
 
     止揚は「思考の土台」で文終端記号で終わるとは限らないため、終端記号チェックは誤判定を
@@ -627,22 +702,27 @@ def _generate_aufheben(generator: Generator, aufheben_user: str, *, temperature:
     存在するか」だけを判定する。空応答はクライアントが再試行済み。温度は 0.9
     （発散と同率。弁証法的跳躍に創造性を要するため）。
     sink が与えられたら、生成前に空ファイルを作り、生成中に逐次追記する。
+    prompts が渡されたら、その言語の system プロンプトを使う（無ければ ja 定数）。
     """
     return _generate_with_completeness_guard(
-        generator, AUFHEBEN_SYSTEM, aufheben_user,
+        generator, _engine_prompt(prompts, "AUFHEBEN_SYSTEM", AUFHEBEN_SYSTEM), aufheben_user,
         temperature=temperature, label="昇華",
         is_complete=_aufheben_is_complete, sink=sink,
     )
 
 
 def _generate_finalize(generator: Generator, finalize_user: str, *, sink: Path | None = None,
-                       fmt: OutputFormat | None = None) -> str:
+                       fmt: OutputFormat | None = None, prompts: dict | None = None) -> str:
     """最終分析を生成する。打ち切りは再生成。温度は 0.0（一貫性。止揚の基盤から超越的統合を明瞭に仕上げる）。
     sink が与えられたら、生成前に空ファイルを作り、生成中に逐次追記する。
     fmt が渡されたら、そのフォーマット固有の長さ範囲で完全性を判定する（タスクに応じたサイズ）。
+    prompts が渡されたら、その言語の system プロンプトを使う（無ければ ja 定数）。
     """
+    system = _engine_prompt(prompts, "ANALYSIS_SYSTEM", ANALYSIS_SYSTEM) + _engine_prompt(
+        prompts, "FINALIZE_SYSTEM", FINALIZE_SYSTEM
+    )
     return _generate_with_completeness_guard(
-        generator, ANALYSIS_SYSTEM + FINALIZE_SYSTEM, finalize_user, label="最終分析",
+        generator, system, finalize_user, label="最終分析",
         is_complete=lambda text: _elevated_is_complete(text, fmt), sink=sink,
         # フォーマット仕様が自己矛盾（抽出した finalize_guidance が求める構造 >
         # 抽出した max_output_length）で達成不能な場合、構造的に完成した最後の試行を
@@ -652,7 +732,7 @@ def _generate_finalize(generator: Generator, finalize_user: str, *, sink: Path |
 
 
 def _generate_logic_check(generator: Generator, artifact: str, task: str, *, sink: Path | None = None,
-                          fmt: OutputFormat | None = None) -> str:
+                          fmt: OutputFormat | None = None, prompts: dict | None = None) -> str:
     """論理一貫性の復元工程。最終成果物を検査し、矛盾があれば修正版を返す。
 
     観察された creativity +0.10 / logic -0.05 の非対称（昇華が「多様化」に偏る）への
@@ -660,15 +740,21 @@ def _generate_logic_check(generator: Generator, artifact: str, task: str, *, sin
     論理を超えた飛躍（アウフヘーベンによる枠組みの創出）自体は矛盾と見なさない。
     温度は 0.0（一貫性）。完全性ガード（文終端）を適用。矛盾が無ければ元の成果物を
     そのまま返すため、品質を下げない。fmt が渡されたらフォーマット固有の長さ範囲で判定する。
+    prompts が渡されたら、その言語のラベル・指示・system を使う（無ければ ja 定数）。
     """
-    parts = [f"【タスク】\n{task}"] if task else []
+    blocks = _blocks(prompts)
+    parts = [f"{blocks.get('task', '【タスク】')}\n{task}"] if task else []
     parts += [
-        f"【成果物】\n{artifact}",
-        f"【論理検査指示】\n{LOGIC_CHECK_INSTRUCTION}",
+        f"{blocks.get('artifact', '【成果物】')}\n{artifact}",
+        f"{blocks.get('logic_check', '【論理検査指示】')}\n"
+        f"{_engine_prompt(prompts, 'LOGIC_CHECK_INSTRUCTION', LOGIC_CHECK_INSTRUCTION)}",
     ]
     user = "\n\n".join(parts)
+    system = _engine_prompt(prompts, "ANALYSIS_SYSTEM", ANALYSIS_SYSTEM) + _engine_prompt(
+        prompts, "LOGIC_CHECK_SYSTEM", LOGIC_CHECK_SYSTEM
+    )
     return _generate_with_completeness_guard(
-        generator, ANALYSIS_SYSTEM + LOGIC_CHECK_SYSTEM, user, label="論理検査",
+        generator, system, user, label="論理検査",
         is_complete=lambda text: _elevated_is_complete(text, fmt), sink=sink,
         fallback_is_complete=_synthesis_is_complete if fmt is not None else None,
     )
@@ -692,7 +778,17 @@ def _generate_draft(
 
 # ---- プロンプト構築（ステートレス生成器への明示補償） ----
 
-def _knowledge_block(knowledge: str | None) -> list[str]:
+def _blocks(prompts: dict | None) -> dict:
+    """プロンプトストアの BLOCKS 節（セクション見出し）。なければ空 dict。"""
+    return (prompts or {}).get("BLOCKS", {})
+
+
+def _engine_prompt(prompts: dict | None, key: str, default: str) -> str:
+    """プロンプトストアの engine 節から定数を取り、無ければ既定（ja 定数）を返す。"""
+    return (prompts or {}).get("engine", {}).get(key, default)
+
+
+def _knowledge_block(knowledge: str | None, *, prompts: dict | None = None) -> list[str]:
     """前提知識をプロンプトのセクションに整形する（なければ空リスト）。
 
     前提知識はタスクの直後に置く（fmt の形式指示より前）。これは「形」ではなく
@@ -700,58 +796,70 @@ def _knowledge_block(knowledge: str | None) -> list[str]:
     """
     if not knowledge:
         return []
-    return [f"【前提知識】\n{knowledge}"]
+    label = _blocks(prompts).get("knowledge", "【前提知識】")
+    return [f"{label}\n{knowledge}"]
 
 
-def _drafts_block(drafts: list[Draft]) -> list[str]:
+def _drafts_block(drafts: list[Draft], *, prompts: dict | None = None) -> list[str]:
     """各草案を「エージェント名付き」のブロックに整形する。"""
-    return [f"【草案（観点: {d.agent}）】\n{d.content}" for d in drafts]
+    tmpl = _blocks(prompts).get("draft", "【草案（観点: {agent}）】")
+    return [tmpl.format(agent=d.agent) + f"\n{d.content}" for d in drafts]
 
 
 def _build_aufheben_prompt(task: str, drafts: list[Draft], fmt: OutputFormat | None = None,
-                           knowledge: str | None = None) -> str:
+                           knowledge: str | None = None, *, prompts: dict | None = None) -> str:
     """止揚（アウフヘーベン）の user プロンプトを組み立てる。
 
     fmt が渡されたら、最終成果物の形式（deliverable_type）を意識するよう指示を追記する。
     弁証法（否定/保存/高次化/超越的視点）自体は不変。
     knowledge が渡されたら、前提知識をタスク直後に注入する（止揚が知識の範囲内で行われる）。
+    prompts が渡されたら、その言語のラベル・指示を使う（無ければ ja 定数）。
     """
-    parts = [f"【タスク】\n{task}"] if task else []
-    parts += _knowledge_block(knowledge)
-    parts += _drafts_block(drafts)
-    instruction = AUFHEBEN_INSTRUCTION
+    blocks = _blocks(prompts)
+    parts = [f"{blocks.get('task', '【タスク】')}\n{task}"] if task else []
+    parts += _knowledge_block(knowledge, prompts=prompts)
+    parts += _drafts_block(drafts, prompts=prompts)
+    instruction = _engine_prompt(prompts, "AUFHEBEN_INSTRUCTION", AUFHEBEN_INSTRUCTION)
     if fmt is not None and fmt.draft_guidance:
-        instruction += (
-            f"\n\nこの止揚は最終的に「{fmt.deliverable_type}」を生成するための思考の土台である。"
-            f"最終出力が{fmt.deliverable_type}の形式になることを意識しつつ、弁証法的止揚を行え。"
+        awareness = blocks.get(
+            "aufheben_deliverable_awareness",
+            "この止揚は最終的に「{deliverable_type}」を生成するための思考の土台である。"
+            "最終出力が{deliverable_type}の形式になることを意識しつつ、弁証法的止揚を行え。",
         )
-    parts.append(f"【昇華指示】\n{instruction}")
+        instruction += f"\n\n{awareness.format(deliverable_type=fmt.deliverable_type)}"
+    parts.append(f"{blocks.get('aufheben_instruction', '【昇華指示】')}\n{instruction}")
     return "\n\n".join(parts)
 
 
 def _build_synthesis_prompt(task: str, drafts: list[Draft], fmt: OutputFormat | None = None,
-                            knowledge: str | None = None) -> str:
+                            knowledge: str | None = None, *, prompts: dict | None = None) -> str:
     """単発昇華（method="single-pass"）の user プロンプトを組み立てる。
 
     fmt が渡されたら、最終成果物の形式指示（finalize_guidance）を追記して、
     単発昇華もタスク固有の形式で仕上げさせる（TVRO 前提にしない）。
     knowledge が渡されたら、前提知識をタスク直後に注入する。
+    prompts が渡されたら、その言語のラベル・指示を使う（無ければ ja 定数）。
     """
-    parts = [f"【タスク】\n{task}"] if task else []
-    parts += _knowledge_block(knowledge)
-    parts += _drafts_block(drafts)
-    instruction = SYNTHESIS_INSTRUCTION
+    blocks = _blocks(prompts)
+    parts = [f"{blocks.get('task', '【タスク】')}\n{task}"] if task else []
+    parts += _knowledge_block(knowledge, prompts=prompts)
+    parts += _drafts_block(drafts, prompts=prompts)
+    instruction = _engine_prompt(prompts, "SYNTHESIS_INSTRUCTION", SYNTHESIS_INSTRUCTION)
     if fmt is not None and fmt.finalize_guidance:
-        instruction += (
-            f"\n\n最終成果物は「{fmt.deliverable_type}」の形式で仕上げよ。"
-            f"\n【最終化指示】\n{fmt.finalize_guidance}"
+        deliverable_line = blocks.get(
+            "synthesis_deliverable", "最終成果物は「{deliverable_type}」の形式で仕上げよ。"
         )
-    parts.append(f"【昇華指示】\n{instruction}")
+        finalize_label = blocks.get("finalize_instruction", "【最終化指示】")
+        instruction += (
+            f"\n\n{deliverable_line.format(deliverable_type=fmt.deliverable_type)}"
+            f"\n{finalize_label}\n{fmt.finalize_guidance}"
+        )
+    parts.append(f"{blocks.get('aufheben_instruction', '【昇華指示】')}\n{instruction}")
     return "\n\n".join(parts)
 
 
 def _build_finalize_prompt(task: str, reconciliation: str, fmt: OutputFormat | None = None,
-                           knowledge: str | None = None) -> str:
+                           knowledge: str | None = None, *, prompts: dict | None = None) -> str:
     """最終分析の user プロンプトを組み立てる。
 
     最終化は草案ではなく「止揚（アウフヘーベン）の基盤」だけを読む。止揚の中間過程が
@@ -759,13 +867,19 @@ def _build_finalize_prompt(task: str, reconciliation: str, fmt: OutputFormat | N
     fmt が渡されたら、そのフォーマット固有の finalize_guidance で TVRO を置き換える
     （タスクに応じた形式で最終成果物を仕上げさせる）。
     knowledge が渡されたら、前提知識をタスク直後に注入する（成果物が知識と矛盾しない）。
+    prompts が渡されたら、その言語のラベル・指示を使う（無ければ ja 定数）。
     """
-    parts = [f"【タスク】\n{task}"] if task else []
-    parts += _knowledge_block(knowledge)
-    finalize_instruction = fmt.finalize_guidance if (fmt is not None and fmt.finalize_guidance) else FINALIZE_INSTRUCTION
+    blocks = _blocks(prompts)
+    parts = [f"{blocks.get('task', '【タスク】')}\n{task}"] if task else []
+    parts += _knowledge_block(knowledge, prompts=prompts)
+    finalize_instruction = (
+        fmt.finalize_guidance
+        if (fmt is not None and fmt.finalize_guidance)
+        else _engine_prompt(prompts, "FINALIZE_INSTRUCTION", FINALIZE_INSTRUCTION)
+    )
     parts += [
-        f"【止揚の基盤】\n{reconciliation}",
-        f"【最終化指示】\n{finalize_instruction}",
+        f"{blocks.get('foundation', '【止揚の基盤】')}\n{reconciliation}",
+        f"{blocks.get('finalize_instruction', '【最終化指示】')}\n{finalize_instruction}",
     ]
     return "\n\n".join(parts)
 
@@ -792,19 +906,26 @@ class DraftEngine:
         agents: dict[str, str] | None = None,
         strong_claim_frame: bool = True,
         enable_logic_check: bool = False,
+        lang: str | None = None,
     ):
         self.client = client
         self.draft_temperature = draft_temperature
         self.enable_logic_check = enable_logic_check
+        self.lang = i18n.resolve_lang(lang)
+        self.prompts: dict = i18n.load_prompts(self.lang)
         if agents is not None:
             self._agents: dict[str, str] = dict(agents)
         else:
-            self._agents = load_agents(agents_dir)
+            self._agents = load_agents(agents_dir, lang=self.lang)
         # 断言枠アブレーション: strong_claim_frame=False のとき旧「最強の主張」枠を除去する
         # （テーゼ集中形式の組み込みエージェントには旧枠が無いため実質 no-op。
         # 旧枠を持つカスタムエージェント混入時の安全網。既定 true = 何もしない）。
         if not strong_claim_frame:
             self._agents = {name: _strip_strong_claim(p) for name, p in self._agents.items()}
+
+    def _block(self, key: str, default: str) -> str:
+        """この言語のセクション見出し（BLOCKS）を取得する。"""
+        return self.prompts.get("BLOCKS", {}).get(key, default)
 
     # ---- 素の生成 ----
 
@@ -831,10 +952,11 @@ class DraftEngine:
         """
         task_for_model = task
         if knowledge:
-            task_for_model = f"{task_for_model}\n\n【前提知識】\n{knowledge}"
+            task_for_model = f"{task_for_model}\n\n{self._block('knowledge', '【前提知識】')}\n{knowledge}"
         if fmt is not None and fmt.finalize_guidance:
             task_for_model = (
-                f"{task_for_model}\n\n【このタスクの最終成果物形式】\n{fmt.finalize_guidance}"
+                f"{task_for_model}\n\n{self._block('final_output_format', '【このタスクの最終成果物形式】')}\n"
+                f"{fmt.finalize_guidance}"
             )
         def _raw_is_complete(text: str) -> bool:
             if _is_facade_contamination(text):
@@ -923,12 +1045,12 @@ class DraftEngine:
         if fmt is not None:
             max_length = DRAFT_MAX_LENGTH_CREATIVE if fmt.output_is_direct else DRAFT_MAX_LENGTH
         else:
-            max_length = DRAFT_MAX_LENGTH_CREATIVE if _is_creative_task(task) else DRAFT_MAX_LENGTH
+            max_length = DRAFT_MAX_LENGTH_CREATIVE if _is_creative_task(task, self.lang) else DRAFT_MAX_LENGTH
         draft_task = task
         if knowledge:
-            draft_task = f"{draft_task}\n\n【前提知識】\n{knowledge}"
+            draft_task = f"{draft_task}\n\n{self._block('knowledge', '【前提知識】')}\n{knowledge}"
         if fmt is not None and fmt.draft_guidance:
-            draft_task = f"{draft_task}\n\n【このタスクの草案形式】\n{fmt.draft_guidance}"
+            draft_task = f"{draft_task}\n\n{self._block('draft_format', '【このタスクの草案形式】')}\n{fmt.draft_guidance}"
         drafts: list[Draft] = []
         for name in names:
             sink = None
@@ -982,27 +1104,31 @@ class DraftEngine:
         if enable_logic_check is None:
             enable_logic_check = self.enable_logic_check
         if method == "two-stage":
-            aufheben_user = _build_aufheben_prompt(task, drafts, fmt, knowledge)
+            aufheben_user = _build_aufheben_prompt(task, drafts, fmt, knowledge, prompts=self.prompts)
             reconciliation = _generate_aufheben(
                 self.client, aufheben_user, temperature=self.draft_temperature,
-                sink=reconciliation_sink,
+                sink=reconciliation_sink, prompts=self.prompts,
             )
-            finalize_user = _build_finalize_prompt(task, reconciliation, fmt, knowledge)
+            finalize_user = _build_finalize_prompt(task, reconciliation, fmt, knowledge, prompts=self.prompts)
             artifact = _generate_finalize(
                 self.client, finalize_user, fmt=fmt,
-                sink=None if enable_logic_check else artifact_sink,
+                sink=None if enable_logic_check else artifact_sink, prompts=self.prompts,
             )
             if enable_logic_check:
-                artifact = _generate_logic_check(self.client, artifact, task, sink=artifact_sink, fmt=fmt)
+                artifact = _generate_logic_check(
+                    self.client, artifact, task, sink=artifact_sink, fmt=fmt, prompts=self.prompts
+                )
             return reconciliation, artifact
         if method == "single-pass":
-            synthesis_user = _build_synthesis_prompt(task, drafts, fmt, knowledge)
+            synthesis_user = _build_synthesis_prompt(task, drafts, fmt, knowledge, prompts=self.prompts)
             artifact = _generate_synthesis(
                 self.client, synthesis_user, fmt=fmt,
-                sink=None if enable_logic_check else artifact_sink,
+                sink=None if enable_logic_check else artifact_sink, prompts=self.prompts,
             )
             if enable_logic_check:
-                artifact = _generate_logic_check(self.client, artifact, task, sink=artifact_sink, fmt=fmt)
+                artifact = _generate_logic_check(
+                    self.client, artifact, task, sink=artifact_sink, fmt=fmt, prompts=self.prompts
+                )
             return "", artifact
         raise ValueError(f"未知の method: {method!r}（'two-stage' または 'single-pass'）")
 

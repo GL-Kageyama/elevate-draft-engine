@@ -2,8 +2,10 @@
 #
 # Elevate Draft Engine installer
 #
-# Installs the 8 creator agents and the elevate-draft-engine facade skill to
-# Claude Code discovery locations so they are available by name.
+# Installs the 24 creator agent variants (8 agents × 3 languages:
+# English `strategist.md`, Japanese `strategist-ja.md`, Chinese `strategist-zh.md`)
+# and the elevate-draft-engine facade skill to Claude Code discovery locations
+# so they are available by name.
 #
 # Usage:
 #   ./install.sh            # Global: ~/.claude/agents/ + ~/.claude/skills/ (callable from any project)
@@ -12,6 +14,10 @@
 #
 # Installation uses symlinks: the canonical source stays in ./agents/ and
 # ./skills/, so edits to the repo are reflected immediately.
+#
+# Language variants: all agents/*.md files are installed, so the agent list
+# grows 3× (e.g. strategist, strategist-ja, strategist-zh). The engine picks
+# the language via `--lang` / the ELEVATE_DRAFT_ENGINE_LANG env var.
 #
 # Note: the engine (main.py) reads ./agents/*.md directly and needs no
 # installation. The agents + skill are only for calling them from Claude Code:
@@ -136,6 +142,8 @@ echo ""
 echo "    Callable as follows:"
 echo "      Skill: elevate-draft-engine       # ファサード（main.py を起動）"
 echo "      Agent: strategist, humanist, ...  # クリエイターエージェント（サブエージェントとして起動可）"
+echo "      Language variants: -ja / -zh suffixes (e.g. strategist-ja)"
+echo "      (the engine selects the language via --lang / ELEVATE_DRAFT_ENGINE_LANG)"
 echo ""
 echo "    Note: the engine (main.py) reads ./agents/*.md directly —"
 echo "          the agents/skill installation only makes them callable from Claude Code."

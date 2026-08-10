@@ -505,7 +505,7 @@ def test_cli_output_format_override_injects_guidance(tmp_path, monkeypatch) -> N
     import main
 
     gen = main.MockGenerator()
-    monkeypatch.setattr(main, "MockGenerator", lambda: gen)
+    monkeypatch.setattr(main, "MockGenerator", lambda lang=None: gen)
 
     code, _ = _run_cli(
         ["improve", "Maruのキャッチコピー", "--mock", "--rounds", "1", "--out", str(tmp_path),
@@ -533,7 +533,7 @@ def test_cli_mock_without_override_skips_extraction(tmp_path, monkeypatch) -> No
     import main
 
     gen = main.MockGenerator()
-    monkeypatch.setattr(main, "MockGenerator", lambda: gen)
+    monkeypatch.setattr(main, "MockGenerator", lambda lang=None: gen)
 
     code, _ = _run_cli(
         ["improve", "タスク", "--mock", "--rounds", "1", "--out", str(tmp_path)]

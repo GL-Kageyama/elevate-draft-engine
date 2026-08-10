@@ -24,6 +24,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from elevate import i18n
+
 # 評価5軸の重み（均等 0.20。ポリシー密着の5軸＝このエンジンが何をする機械かを測る）
 DEFAULT_WEIGHTS: dict[str, float] = {
     "diversity": 0.20,  # 多様性（視点の横断・分野の広さ）— 発散
@@ -157,11 +159,14 @@ class EvaluationEngine:
         weights: dict[str, float] | None = None,
         pass_threshold: float = DEFAULT_PASS_THRESHOLD,
         quality_evaluator=None,
+        lang: str | None = None,
     ):
         self.client = client
         self.weights = weights or DEFAULT_WEIGHTS
         self.pass_threshold = pass_threshold
         self.quality_evaluator = quality_evaluator  # QualityEvaluator | None
+        self.lang = i18n.resolve_lang(lang)
+        self.prompts: dict = i18n.load_prompts(self.lang)
 
     def evaluate(self, artifact: str, task_prompt: str = "") -> EvaluationResult:
         """成果物を品質評価（5軸 + 定番さ・独自性）で採点する。
@@ -170,28 +175,34 @@ class EvaluationEngine:
         5軸スコアJSONの抽出に失敗した場合、形式エラーのフィードバックを付けて
         再生成する（最大3回。崩れたら再生成）。品質評価が統合されているときは、
         5軸評価に加えて品質評価（新奇度・独自性・意外性）を呼び、overall を掛け算する。
+        プロンプトは prompts/{lang}.json の evaluator 節（無ければ ja 定数）。
         """
-        system = (
+        ev = self.prompts.get("evaluator", {})
+        rubric = ev.get("RUBRIC", RUBRIC)
+        system = ev.get(
+            "SYSTEM",
             "あなたは成果物の評価者です。提示された成果物を、所定のルーブリックに従い"
             "5軸（Diversity / Synthesis / Elevation / Honesty / Utility）で公平に採点してください。"
-            "成果物の出所・生成方法は知らされていません。\n\n" + RUBRIC
-        )
-        base_user = (
-            f"【評価対象の成果物】\n{artifact}\n\n"
-            f"【元のタスク】\n{task_prompt}\n\n"
-            "上記の成果物を5軸で採点し、最終行にJSONでスコアを出力してください。"
+            "成果物の出所・生成方法は知らされていません。",
+        ) + "\n\n" + rubric
+        base_user = ev.get(
+            "BASE_USER",
+            "【評価対象の成果物】\n{artifact}\n\n"
+            "【元のタスク】\n{task}\n\n"
+            "上記の成果物を5軸で採点し、最終行にJSONでスコアを出力してください。",
+        ).format(artifact=artifact, task=task_prompt)
+        example = '{"diversity": 0.5, "synthesis": 0.5, "elevation": 0.5, "honesty": 0.5, "utility": 0.5}'
+        feedback_tmpl = ev.get(
+            "FEEDBACK",
+            "\n\n前回の応答からスコアJSONを抽出できませんでした（{error}）。"
+            "説明文はそのままでも構いませんが、必ず最終行に {example} 形式のJSONを出力してください。",
         )
         last_err = ""
         raw = ""
         for attempt in range(MAX_EVALUATION_RETRIES):
             feedback = ""
             if attempt > 0:
-                feedback = (
-                    "\n\n前回の応答からスコアJSONを抽出できませんでした（"
-                    f"{last_err}）。説明文はそのままでも構いませんが、"
-                    '必ず最終行に {"diversity": 0.5, "synthesis": 0.5, "elevation": 0.5, '
-                    '"honesty": 0.5, "utility": 0.5} 形式のJSONを出力してください。'
-                )
+                feedback = feedback_tmpl.format(error=last_err, example=example)
             raw = self.client.evaluate(system=system, user=base_user + feedback)
             try:
                 scores = parse_scores(raw)

@@ -3,6 +3,9 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# 設計資料・較正レポートなどの作業文書（コミット対象外。ユーザー指示で除外）
+資料/
+
 # C extensions
 *.so
 

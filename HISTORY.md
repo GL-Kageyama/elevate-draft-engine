@@ -1,5 +1,41 @@
 # 開発履歴
 
+## i18n 多言語化完了（2026-08-10）— en/ja/zh で全機能を回す
+
+`資料/多言語化ver2/elevate-draft-engine-i18n-plan.md`（ver2 計画）を実施し、en/ja/zh の3言語対応を完了した。
+wisdom-council-layer（ver1）と同じ3層方式（locales/・prompts/・agents/ 言語別）を、Python エンジン構成に適用。
+
+- **言語解決**: CLI `--lang` > `ELEVATE_DRAFT_ENGINE_LANG` env > 既定 en（D1）。`load_agents(lang=...)` は接尾辞を剥いてベース名8体を返すため `--agents` は言語非依存。conftest が env を ja に固定し既存 ja テストを保護。
+- **品質キー英語化（D2）**: 品質評価 JSON を `novelty`/`originality`/`surprise`/`rationale` に一本化。
+- **docs ミラーツリー**: README/CLAUDE/docs/examples-README を en メイン + ja/zh ミラーへ。en/zh ドキュメントの日本語漏れを除去（grep スキャンで確認）。
+- **examples/i18n 実生成反映**: `morning-routine-{en,ja,zh}` の3サンプルを、mock テンプレートから**実回答**へ書き換え（同一タスク「朝のルーティーン設計」を3言語で実API生成）。format.md も各言語に追加。
+- **全コマンド × 3言語のカバレッジテスト**: generate/diverge/synthesize + `--agents`/`--knowledge-file`/`--output-format`・compare `--runs`・improve `--rounds 2 --evaluate` を test_i18n.py に追加。テスト 241 件パス（内 28 件 test_i18n.py）。
+
+### 空応答の根本原因と修正（max_tokens 拡大）
+
+en の止揚（aufheben）が**12連続で空応答**になり、en 実生成が完了できない障害が発生（ja/zh は成功）。診断の結果:
+
+- 実ゲートウェイ（api.deepseek.com/anthropic）は reasoning モデルが **thinking（思考）ブロック**を返す。
+- thinking と text は **max_tokens を共有**し、長い system（en の AUFHEBEN_SYSTEM 670字 + 「Prioritize depth」）だと思考が 4096 を全て消費し、text が 0 の「空応答」になる（診断: `stop_reason='max_tokens'` + thinking のみ）。
+- ja（277字）/ zh（221字）は system が短く思考も短いため 4096 でも成功。en だけ失敗するのは system 長（思考量）の差で、入力草案サイズや並列とは無関係。
+
+**修正**: `adapters/claude_client.py` の `max_tokens` 既定を 4096 → **16384** に引き上げ（`CLAUDE_MAX_TOKENS` env で変更可。README の env 表に追記）。回帰テスト3件追加（思考込みの予算を保証）。修正後、en 止揚は 18KB 級の完全な弁証法的昇華を生成して成功（実証済み）。
+
+### ランタイム較正（フェーズ8.2）— en バイアスは再現せず
+
+`utils/calibrate_language_bias.py` で同一成果物（en 昇華版）を en/ja/zh で各3回評価。
+
+| 指標 | en | ja | zh |
+|---|---|---|---|
+| 5軸平均 | 0.717 [0.667, 0.766] | 0.750 [0.728, 0.772] | 0.727 [0.709, 0.744] |
+| 品質平均 | 0.472 [0.396, 0.548] | 0.378 [0.318, 0.437] | 0.544 [0.402, 0.687] |
+| overall | 0.433 (below) | 0.400 (below) | 0.478 (below) |
+
+**所見**: (1) ver1（wisdom-council）の「en が系統的に +8〜9 点」は**再現しない**。品質平均で ja -0.094・zh +0.072 と方向が混在 = 系統的バイアスでない。(2) 5軸平均のずれは ±0.03 以内で計画の目安 0.05 未満 → **閾値の再取得は不要**。(3) 品質のずれは n=3 で CI が重なり統計的に分離できず、ノイズの可能性（要望があれば repeats 増で再測定）。(4) PASS/FAIL 判定は言語で反転しない（全言語 below で一貫）。
+
+- テスト: 241 件パス（`pytest tests/`）。知識・複数ループ・多言語の相互検証を追加（i18n+knowledge 73件、compare/improve 3言語分）。
+- ついでに修正: `資料/`（設計資料・較正レポート）をコミット対象外として .gitignore に追加。
+
 ## 文書整理（2026-08-09）— README を概要化し docs/ に分離
 
 README の深掘りセクション（出力フォーマット認識・前提知識注入・compare/improve・Python API）を

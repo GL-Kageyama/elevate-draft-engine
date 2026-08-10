@@ -1,85 +1,72 @@
-# 昇華優位性の計測と反復改善（compare / improve）
+**Language:** [English](measurement.md) | [日本語](ja/measurement.md) | [中文](zh/measurement.md)
 
-## compare — 昇華 vs 単発生成の実測
+# Measuring sublation superiority and iterative improvement (compare / improve)
 
-`compare` は「昇華」と「単発生成（または昇華しない最良草案選択）」を同じ入力で走らせ、
-スコアと勝率を実測して比較する装置である。優位性の断言はせず、数値に委ねる。
+## compare — measuring sublation vs single-shot generation
 
-| オプション | 動作 |
+`compare` is a device that runs "sublation" and "single-shot generation (or best-draft selection without sublation)" on the same input, measuring scores and win rates to compare them. It does not assert superiority; it leaves that to the numbers.
+
+| Option | Behavior |
 |---|---|
-| `--runs N` | 比較を N 回反復し、平均 overall・標準偏差・勝率（ELEVATE > ベースライン）を出力。既定 1 |
-| `--baseline single` | ベースライン = 素の単発生成（`generate`）。既定 |
-| `--baseline best-of-n` | ベースライン = **昇華しない最良草案選択**（帰無仮説）。同一の8草案から昇華せず最高スコアの草案を選ぶ場合と、昇華する場合を同一評価器で測る。`--evaluate` 必須 |
-| `--no-strong-claim` | エージェントから旧「最強の主張」断言枠を除去（テーゼ集中形式では実質 no-op。後方互換のため維持） |
+| `--runs N` | Runs the comparison N times and outputs the mean overall, standard deviation, and win rate (ELEVATE > baseline). Default 1 |
+| `--baseline single` | Baseline = raw single-shot generation (`generate`). Default |
+| `--baseline best-of-n` | Baseline = **best-draft selection without sublation** (the null hypothesis). From the same 8 drafts, choosing the highest-scoring draft without sublating vs. sublating are measured with the same evaluator. Requires `--evaluate` |
+| `--no-strong-claim` | Removes the "strongest claim" strong-claim frame from agents (effectively a no-op under the thesis-focused format; kept for backward compatibility) |
 
-`--runs N`（N>1）を渡すと、各 run のスコアを集計して以下を出力する:
-
-```bash
-=== 比較集計 ===
-素の生成（単発）: mean=0.778 sd=0.012（n=3）
-ELEVATE:            mean=0.812 sd=0.009（n=3）
-差（ELEVATE−ベースライン）: mean=0.034 sd=0.015（n=3）
-勝率（ELEVATE > ベースライン）: 3/3 = 100.0%
-  勝率 95%CI（Wilson）: 43.8%〜100.0%
-  差の 95%CI（t, 両側）: -0.003〜+0.071
-  効果量（Cohen's d）: +1.90
-```
-
-（上記は集計フォーマットの形式例であり、値は実測ではない。
-95%CI は小標本では広く開く——n≥10 まで集めてから統計的優位性を論じること。）
-
-**実証は統計だけでなく、成果物を読むことでもある。** `compare` は各 run に素AI生成（`raw.md`）と
-昇華版（`elevated.md`）を両方保存する。それらを客観視するための比較ドキュメントを生成する:
+Passing `--runs N` (N>1) aggregates each run's scores and outputs the following:
 
 ```bash
-python render_comparison.py examples/<sample_dir>        # comparison.md（両方を束ねる）
-python render_comparison.py examples/<sample_dir> --html # + comparison.html（横並び表示）
+=== comparison aggregate ===
+plain generation (single-shot): mean=0.778 sd=0.012 (n=3)
+ELEVATE:                        mean=0.812 sd=0.009 (n=3)
+difference (ELEVATE − baseline): mean=0.034 sd=0.015 (n=3)
+win rate (ELEVATE > baseline): 3/3 = 100.0%
+  win-rate 95% CI (Wilson): 43.8% to 100.0%
+  difference 95% CI (t, two-sided): -0.003 to +0.071
+  effect size (Cohen's d): +1.90
 ```
 
-同一タスク・同一モデルでこの計測を多数回実行し、結果を examples/ に公開することが、
-本エンジンの存在理由を実証する経路である。勝率が 50% を下回るタスクが存在してもよい
-（その開示こそが誠実な主張になる）。サンプルは「full」だけに偏らせない——分野をばらけさせ、
-エージェント数・ループ数を振る。昇華優位性が特定のタスク・構成に依存しないことを、
-複数条件の実測で示すのが目的である。
+(The above is a format example of the aggregate output; the values are not measurements. The 95% CI is wide for small samples — gather n≥10 before discussing statistical significance.)
 
-## improve — 昇華版を磨くループ
-
-`improve` は、一度作った昇華版を**繰り返し磨き上げる**ためのループである:
-
-```
-昇華版 → 改修の草案(複数) → 昇華 → 新しい昇華版 → （繰り返し）
-```
-
-- round 1: オリジナルタスクから発散 → 昇華で**初回の昇華版**を作る。
-- round 2 以降: 各エージェントが**前回の昇華版を改修した草案**を書き、それらを昇華して
-  次の昇華版を作る。昇華版の成果がループを回すごとに相続され、積み上がっていく。
-  （「昇華したらおしまい」ではなく、昇華版を土台にしてさらに磨く。）
-- 各 round は `round_NN/` に分離保存（`draft_*` / `reconciliation` / `elevated`）され、
-  履歴が追える。`progress.md` に全 round の長さと評価が記録される。
+**Demonstration is not only statistics but also reading the artifacts.** `compare` saves both the raw AI generation (`raw.md`) and the elevated artifact (`elevated.md`) for each run. It generates a comparison document to view them objectively:
 
 ```bash
-python main.py improve "タスク" --rounds 3                # 3回の昇華を繰り返す
-python main.py improve "タスク" --rounds 5 --evaluate     # 各ラウンドを品質評価
+python render_comparison.py examples/<sample_dir>        # comparison.md (binds both)
+python render_comparison.py examples/<sample_dir> --html # + comparison.html (side-by-side view)
 ```
 
-| オプション | 動作 |
+Running this measurement many times on the same task and model and publishing the results under examples/ is the path that demonstrates this engine's reason to exist. It is fine for some tasks to fall below a 50% win rate (disclosing that is exactly what makes the claim honest). Do not bias the samples toward "full" only — spread across domains and vary the agent count and loop count. The goal is to show with measurements under multiple conditions that sublation superiority does not depend on a particular task or configuration.
+
+## improve — a loop that polishes the elevated artifact
+
+`improve` is a loop that **repeatedly polishes** an elevated artifact that was once produced:
+
+```
+elevated → revision draft(s) → sublate → new elevated → (repeat)
+```
+
+- round 1: diverge from the original task → sublation produces the **initial elevated artifact**.
+- from round 2 on: each agent writes a **draft revising the previous elevated artifact**, and these are sublated into the next elevated artifact. The elevated artifact's results are inherited and accumulate with each loop turn. (Rather than "sublate once and done", it polishes further on top of the elevated artifact.)
+- Each round is saved separately under `round_NN/` (`draft_*` / `reconciliation` / `elevated`), so history can be traced. `progress.md` records the length and evaluation of every round.
+
+```bash
+python main.py improve "TASK" --rounds 3                # repeat the sublation 3 times
+python main.py improve "TASK" --rounds 5 --evaluate     # quality-evaluate each round
+```
+
+| Option | Behavior |
 |---|---|
-| `--rounds N` | 昇華を繰り返す回数（既定 3） |
-| `--evaluate` | 各ラウンドの昇華版を品質評価し、overall を progress.md に記録 |
-| `--min-improve` | 頭打ちしきい値。直前ラウンドからの overall 改善がこれ未満なら早期停止（既定 0.01）。`--evaluate` 時のみ |
-| `--quality-ceiling` | 高品位停止しきい値。overall がこれ以上なら改修ラウンドを生成せず停止（既定 0.75）。`--evaluate` 時のみ・既定で有効 |
+| `--rounds N` | Number of sublation rounds (default 3) |
+| `--evaluate` | Quality-evaluates each round's elevated artifact and records overall in progress.md |
+| `--min-improve` | Plateau threshold. Early-stops when the overall improvement from the previous round is below this (default 0.01). Only with `--evaluate` |
+| `--quality-ceiling` | Quality-ceiling threshold. Stops without generating a revision round when overall is at or above this (default 0.75). Only with `--evaluate`; enabled by default |
 
-`--evaluate` の早期停止は、**過修正で元の良さを失わせない**ための安全弁である。
-(1) **高品位停止**: 昇華版の overall が `--quality-ceiling`（既定 0.75）以上なら、
-次の改修ラウンドを生成せず停止する。既に高品位な成果物ほど改修で壊れやすい。
-(2) **頭打ち停止**: 直前ラウンドからの改善が `--min-improve`（既定 0.01）
-未満なら停止。ゼロからやり直す `compare` とは対照的に、`improve` は相続によって
-改善していく。停止理由は `progress.md` の「**停止理由**」に記録される。
+`--evaluate`'s early stopping is a safety valve that keeps **over-correction from losing the original quality**. (1) **Quality-ceiling early-stop**: if the elevated artifact's overall is at or above `--quality-ceiling` (default 0.75), stop without generating the next revision round. The higher-quality an artifact already is, the more easily revision breaks it. (2) **Plateau early-stop**: stop when the improvement from the previous round is below `--min-improve` (default 0.01). In contrast to `compare`, which starts from zero each time, `improve` improves through inheritance. The stop reason is recorded under "**stop reason**" in progress.md.
 
-mock での動作確認（品質評価は mock では無効のため、overall = 均等重み × 各軸。素の生成相当は 0.600 から始まる。Pass しきい値 0.60）:
+Behavior check with mock (quality evaluation is disabled under mock, so overall = equal weights × each axis. The single-shot-generation equivalent starts at 0.600. Pass threshold 0.60):
 
 ```
-[round 1 昇華版] overall=0.600（Pass）     ← 素の生成相当。天井でなく改善の余地がある
-[round 2 昇華版] overall=0.720（Pass）   +0.120
-[round 3 昇華版] overall=0.720（Pass）   +0.000 → 頭打ちと判断し停止（過修正を避ける）
+[round 1 elevated] overall=0.600 (Pass)   ← equivalent to plain generation; room for improvement, not the ceiling
+[round 2 elevated] overall=0.720 (Pass)   +0.120
+[round 3 elevated] overall=0.720 (Pass)   +0.000 → judged plateaued and stopped (avoids over-correction)
 ```

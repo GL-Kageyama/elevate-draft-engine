@@ -1,250 +1,228 @@
+**Language:** [English](README.md) | [日本語](README-ja.md) | [中文](README-zh.md)
+
 # elevate-draft-engine
 
 <p align="center">
   <img src="assets/repo-hero.png" width="100%" alt="elevate-draft-engine">
 </p>
 
-**複数のAIがそれぞれ別の視点から書いた答えをぶつけ合って、どの単一の視点にもない一段高い答えを生むエンジン。**
+**An engine that makes multiple AIs collide answers written from separate viewpoints to produce a one-dimension-higher answer that no single viewpoint possesses.**
 
-AIが一発で出す「平均的な良い答え」を超えるために、**DIVERGE（発散）→ SYNTHESIZE（昇華）** の2段構えを取る。
+To go beyond the "average-good answer" a single AI shot produces, it takes a two-stage structure: **DIVERGE → SYNTHESIZE (sublation)**.
 
 ```
-            タスク
-              │
-              ├─→ [Draft: strategist]     価値
-              ├─→ [Draft: differentiator] 独自性
-              ├─→ [Draft: humanist]       共感
-              ├─→ [Draft: futurist]       将来性
-              ├─→ [Draft: designer]       体験設計
-              ├─→ [Draft: visionary]      世界観
-              ├─→ [Draft: implementer]    実現性
-              └─→ [Draft: storyteller]    物語
-                      │
-                      ↓
-             [昇華推理 Aufheben]        ← 各草案の一面性を否定しつつ、真理の契機を保存し、
-                      │                   矛盾を包括する一段高い枠組みを創出（思考の土台。読者向けではない）
-                      ↓
-             [最終化 Finalize]           ← 止揚推理だけを読み、超越的統合解を単発生成を上回る明瞭な成果物に仕上げる
-                      │
-                      ↓
-                最終成果物
+            task
+             │
+             ├─→ [Draft: strategist]       value
+             ├─→ [Draft: differentiator]   originality
+             ├─→ [Draft: humanist]         empathy
+             ├─→ [Draft: futurist]         future potential
+             ├─→ [Draft: designer]         experience design
+             ├─→ [Draft: visionary]        worldview
+             ├─→ [Draft: implementer]      feasibility
+             └─→ [Draft: storyteller]      story
+                     │
+                     ↓
+      [Aufheben sublation reasoning]  ← negates each draft's one-sidedness while preserving
+                     │                    moments of truth, encompassing contradictions in a
+                     ↓                    higher framework (the reasoning base; not reader-facing)
+      [Finalize]                        ← reads only the sublation reasoning and finishes the
+                     │                        transcendent integrated solution into a clearer
+                     ↓                        artifact that outdoes single-shot generation
+                  final artifact
 ```
 
-- **DIVERGE**: 8種のクリエイターエージェント × 温度 0.9 で、それぞれが**極限まで逸脱した**独立草案を生成。役割多様性（system）＋温度多様性で独立を保証。妥協や中間解は素材にならない——後の昇華で一段高い次元へ引き上げるための、あえて先鋭化した個別解を出す。
-- **SYNTHESIZE**（核心）: 全草案を読み、**否定・保存・高次化**の三契機で止揚する昇華推理（temp 0.9）→ 止揚推理だけを読む最終化（temp 0.0）。単一観点の草案にはない超越的な統合解を構成する。
-  - 例えば strategist の「収益」と humanist の「共感」の衝突は、論理的な妥協（条件付き受容）ではなく、両者の真理を**同時に成立させる新たな枠組み**へ止揚される。
-  - 「昇華が単発生成を上回る」は**設計目標**。`compare` による実測で検証する（[昇華優位性の計測](#昇華優位性の計測compare) を参照）。
-  - `synthesize()` は**外部草案も受け付ける**。人間の専門家が書いた分析、別モデルの出力、過去の成果物など、出所を問わず「複数の異なる視点」を突っ込めば超越的な統合解を返す。
+- **DIVERGE**: 8 creator agents × temperature 0.9 each generate independent drafts **diverged to the extreme**. Independence is guaranteed by role diversity (system) plus temperature diversity. Compromise and middle-ground solutions are not material — each agent deliberately produces a sharpened individual solution, to be raised to a higher dimension in the later sublation.
+- **SYNTHESIZE** (the core): reads all drafts and performs sublation reasoning (temp 0.9) that sublates them through the three moments of **negate / preserve / elevate**, then finalization (temp 0.0) that reads only the sublation reasoning. It composes a transcendental integrated solution that no single-viewpoint draft contains.
+  - For example, the clash between the strategist's "profit" and the humanist's "empathy" is sublated not into a logical compromise (conditional acceptance) but into a **new framework that makes both truths hold simultaneously**.
+  - "Sublation beats single-shot generation" is a **design goal**, verified by measurement with `compare` (see [Measuring sublation superiority](#measuring-sublation-superiority-compare)).
+  - `synthesize()` also **accepts external drafts**. Whatever the origin — an analysis written by a human expert, another model's output, past artifacts — feed in "multiple different viewpoints" and it returns a transcendental integrated solution.
 
-## 評価の5軸（ポリシー密着）
+## The 5 axes of evaluation (policy-bound)
 
-`--evaluate` の採点は、**このエンジンが「良い成果物」だと信じていること**（ポリシー: 複数の独立した視点を昇華して単一視点を超える成果物を生む）を5つの軸に分解し、それぞれ 0.0〜1.0 で測る。
+The scoring of `--evaluate` decomposes what **this engine believes a "good artifact" is** (policy: sublate multiple independent viewpoints to produce an artifact that transcends any single viewpoint) into five axes and measures each from 0.0 to 1.0.
 
-最初の3軸は「発散 → 昇華 → 超越」というエンジンの動きの質を、残る2軸は成果物の仕上がりの質を測る。
+The first three axes measure the quality of the engine's motion — "diverge → sublate → transcend" — and the remaining two measure the finish quality of the artifact.
 
-| 軸 | 概要 | 高得点（0.7〜0.8） | 低得点（0.0〜0.4） |
+| Axis | Summary | High score (0.7–0.8) | Low score (0.0–0.4) |
 |---|---|---|---|
-| **多様性** | 物事を色々な立場・分野から眺めているか | 複数の視点・価値観を横断し、分野を広く賄っている | ひとつの見方に閉じている |
-| **統合性** | 違いを「並べた」のではなく「噛み合わせた」か | 視点間の矛盾を解決し、相互に連結した構造になっている | 断片の寄せ集め・併記（平均化も不合格） |
-| **超越性** | どの単一視点にもなかった新しい見方が生まれたか | 統合を経て初めて得られる新たな視点が明確にある | どれかの草案の焼き直し |
-| **誠実性** | 確かなことと不確かなことを区別しているか | 不確実な点は条件付き・前提として明示している | 根拠のないことを断定している |
-| **実用性** | 実際にどう進めて誰がどう使うか、筋道が見えるか | 実行の筋道と利用者が具体的に描ける | 抽象的で実行可能性が確認できない |
+| **Diversity** | Whether things are viewed from various positions and fields | Traverses multiple viewpoints and values, broadly covering the field | Confined to a single way of seeing |
+| **Synthesis** | Whether differences are "meshed" rather than merely "listed" | Resolves contradictions between viewpoints into an interconnected structure | A patchwork or enumeration of fragments (averaging also fails) |
+| **Elevation** | Whether a new viewpoint absent from every single viewpoint was born | A clear new viewpoint that is only attainable through synthesis | A rehash of one of the drafts |
+| **Honesty** | Whether certain things and uncertain things are distinguished | Uncertain points are stated explicitly as conditional or assumptions | Asserts things without grounds |
+| **Utility** | Whether the path of how to actually proceed and who uses it is visible | The execution path and users can be drawn concretely | Abstract; feasibility unverifiable |
 
-採点のルール:
+Scoring rules:
 
-- **重みは均等（各 0.20）**: `5軸overall = 多様性×0.20 + 統合性×0.20 + 超越性×0.20 + 誠実性×0.20 + 実用性×0.20`
-- **全軸「高いほど良い」**: 全5軸ともスコアが高いほど良い成果物を示す（反転ロジックはない）。
-- **採点アンカー**: 0.5 = 無難（凡庸） / 0.7〜0.8 = 確かに良い / 0.9 以上 = 凡庸な生成では出ない「固有の枠組み・見方の転換」。凡庸な出力に 0.7 以上をつけない。
-- **盲検**: 評価は生成とは独立した評価専用モデルが、成果物の出所・生成方法を知らされずに行う。
+- **Weights are equal (0.20 each)**: `5-axis overall = diversity×0.20 + synthesis×0.20 + elevation×0.20 + honesty×0.20 + utility×0.20`
+- **All axes: "higher is better"**: on all five axes, a higher score indicates a better artifact (there is no inverted logic).
+- **Scoring anchors**: 0.5 = safe (mediocre) / 0.7–0.8 = genuinely good / 0.9 and above = a "distinctive framework or shift of perspective" that mediocre generation never produces. Do not give a mediocre output 0.7 or higher.
+- **Blind evaluation**: evaluation is performed by a model dedicated to evaluation, independent of generation, without being told the artifact's origin or generation method.
 
-## 品質評価（overall に統合）
+## Quality evaluation (integrated into overall)
 
-`--evaluate` の overall は、5軸評価に**品質評価（定番さ・独自性）**を掛け算で統合する。
-5軸評価は「定番さ・独自性」を測らないため、素の生成（指示のみ）が定番タスクで無難な回答を
-出しても 5軸 overall が高止まりし、独自性の差が反映されない。品質評価がこの死角を埋める。
+The overall of `--evaluate` integrates the 5-axis evaluation with a **quality evaluation (genericness / originality)** multiplicatively. Because the 5-axis evaluation does not measure "genericness / originality", a single-shot generation (instructions only) that gives a safe answer on a generic task keeps the 5-axis overall high, and differences in originality are not reflected. The quality evaluation fills this blind spot.
 
-| 観点 | 概要 | 高いほど |
+| Viewpoint | Summary | Higher means |
 |---|---|---|
-| **新奇度** | そのタスクの「典型的な回答」からどの程度逸脱しているか | 目新しく、定番レパートリーに収まっていない |
-| **独自性** | 定番レパートリーにない固有の視点・概念枠組み・造語・哲学があるか | 固有の枠組みがある |
-| **意外性** | 読み手の予想を裏切る要素があるか | 予想を裏切る |
+| **Novelty** | How far it departs from the "typical answer" for this task | Novel; not within the standard repertoire |
+| **Originality** | Whether it has a distinctive viewpoint, conceptual framework, neologism, or philosophy absent from the standard repertoire | Has a distinctive framework |
+| **Surprise** | Whether it contains an element that defies the reader's expectations | Defies expectations |
 
-overall の式（α = 0.25。`0.75` は `1−α`）:
+overall formula (α = 0.25; `0.75` is `1−α`):
 
-    overall = 5軸overall × (α + (1−α) × 品質スコア)
-    品質スコア = (新奇度 + 独自性 + 意外性) / 3
+    overall = 5-axis overall × (α + (1−α) × quality score)
+    quality score = (novelty + originality + surprise) / 3
 
-- **定番回答は大幅に減点される**: 品質スコア 0.2（定番）なら係数 0.40、0.8（独自）なら係数 0.85。
-- **Pass しきい値は 0.60**: 品質評価の掛け算で overall の絶対値が下がるため、5軸単独時代の 0.70 から再調整。
-- **`--no-quality`** で品質評価なし（5軸のみの overall）に戻せる。
+- **Generic answers are heavily penalized**: a quality score of 0.2 (generic) gives a factor of 0.40; 0.8 (original) gives 0.85.
+- **Pass threshold is 0.60**: because the multiplicative quality evaluation lowers the absolute value of overall, the pass threshold sits at 0.60.
+- **`--no-quality`** returns to evaluation without the quality evaluation (5-axis-only overall).
 
-## エージェント（agents/）
+## Agents (agents/)
 
-**1エージェント=1ファイル**方式で `agents/{name}.md` に配置する。正本はファイル。
-エンジンは起動時に `agents/*.md` を読み込み、
-frontmatter の `name` をエージェント名、本文（ペルソナ）をシステムプロンプトとして使う。
+Each agent lives in `agents/{name}.md` — **one agent per file**. The file is the source of truth. At startup the engine loads `agents/*.md`, using the frontmatter `name` as the agent name and the body (the persona) as the system prompt.
 
 ```markdown
 ---
 name: strategist
-description: 価値の観点。最大の市場価値・成功条件・競合優位。…
+description: Value. Maximum market value, success conditions, competitive advantage, and who pays.
 ---
 
 You are the **Strategist**, a voice of value and markets.
 …
 ```
 
-**エージェントを追加する**: `agents/{name}.md` を追加する（再起動で読込まれる）か、
-実行中は `add_agent(name, system_prompt)` で追加する。削除は `remove_agent(name)`。
+**Adding an agent**: add `agents/{name}.md` (loaded on restart), or at runtime call `add_agent(name, system_prompt)`. To remove one, call `remove_agent(name)`.
 
-**草案のテーゼ集中形式**: 各エージェントの草案は完全な分析レポートではなく、後の昇華に渡す
-**先鋭化した1つのテーゼ**である（エージェントファイルの「草案の作り方」に組込み済み）。
-**核心的主張**（3文以内）・**根拠**（箇条書き3点以内・各1文）・**前提**（1文・省略可）の
-3要素のみで500〜800字に収める。草案が分析レポート化すると昇華が全てを拾おうとして過剰包摂し、
-検証不能な数字を捏造して utility が落ちる。テーゼに絞ることで対立構造が鮮明になり、速度と昇華品質を同時に改善する。
-`DRAFT_MAX_LENGTH`（1000字）を超える草案は不完全扱いで再生成される。「反論されそうな点」は
-**付けない**——草案に弱点を先読みさせると自由な逸脱が萎縮するため、反論の検出は昇華段階の
-Aufheber が引き受ける。
+**Thesis-focused draft format**: each agent's draft is not a complete analysis report but a **single sharpened thesis** handed to the later sublation (already built into the "How to write a draft" section of the agent files). It is confined to 500–800 characters with only three elements: **core thesis** (within 3 sentences), **grounds** (up to 3 bullet points, one sentence each), and **premise** (1 sentence, optional). If a draft becomes an analysis report, the sublation tries to pick up everything, over-includes, and fabricates unverifiable numbers, dropping utility. Focusing on the thesis makes the conflict structure clearer, improving speed and sublation quality at once. A draft exceeding `DRAFT_MAX_LENGTH` (1000 characters) is treated as incomplete and regenerated. Do **not** add "points open to rebuttal" — making a draft anticipate its own weaknesses would shrink free divergence; rebuttal detection is taken up by the Aufheber at the sublation stage.
 
-デフォルト8エージェントは全クリエイター目線で統一されており、エージェント同士の
-**生産的衝突**が昇華解の源泉になる。懐疑・批判は昇華段階の Aufheber が
-引き受ける（草案同士の矛盾を検出して止揚する）。
+The default 8 agents are unified around creator viewpoints, and the **productive clash** between agents is the source of the sublated solution. Skepticism and criticism are handled by the Aufheber at the sublation stage (which detects and sublates contradictions between drafts).
 
-エージェントは `./install.sh` で Claude Code のサブエージェント（Agent tool / @-mention）
-としても呼べるようになる。ただし**エンジンはサブエージェントを使わない**——
-`agents/*.md` をリポジトリ内から直接読む。オーケストレーションは常に Python エンジン側。
+Agents can also be called as Claude Code subagents (Agent tool / @-mention) via `./install.sh`. However, **the engine does not use subagents** — it reads `agents/*.md` directly from the repository. Orchestration always lives on the Python engine side.
 
-| # | ファイル | 観点 |
-|---|---------|------|
-| 1 | `designer` | 体験設計 |
-| 2 | `differentiator` | 独自性 |
-| 3 | `futurist` | 将来性 |
-| 4 | `humanist` | 共感 |
-| 5 | `implementer` | 実現性 |
-| 6 | `storyteller` | 物語 |
-| 7 | `strategist` | 価値 |
-| 8 | `visionary` | 世界観 |
+| # | File | Viewpoint |
+|---|------|-----------|
+| 1 | `designer` | Experience design |
+| 2 | `differentiator` | Originality |
+| 3 | `futurist` | Future potential |
+| 4 | `humanist` | Empathy |
+| 5 | `implementer` | Feasibility |
+| 6 | `storyteller` | Story |
+| 7 | `strategist` | Value |
+| 8 | `visionary` | Worldview |
 
-## クイックスタート
+## Multilingual support (--lang)
+
+The engine supports three languages: en / ja / zh (default **en**). The language is specified with the `--lang {en,ja,zh}` flag and resolved in the order: the flag, then the environment variable `ELEVATE_DRAFT_ENGINE_LANG`, then the default `en`.
+
+| Area | Language handling |
+|---|---|
+| Agents | `agents/{name}.md` (en) / `agents/{name}-ja.md` (ja) / `agents/{name}-zh.md` (zh). Specifying by **base name** (e.g. `--agents strategist`) makes it language-independent |
+| LLM prompts | `prompts/{lang}.json` (engine constants, quality rubric, mock text) |
+| CLI / save templates | `locales/{lang}.json` |
+| Quality-evaluation JSON | Keys are always English (`novelty`/`originality`/`surprise`/`rationale`); only the labels are localized |
+
+A file with no suffix placed directly under `agents/` is treated as **en** (to write a custom agent in Japanese, place `agents/{name}-ja.md`; in Chinese, `-zh.md`).
+
+## Quick start
 
 ```bash
 python -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/python -m pytest tests/ -q     # 184件
+.venv/bin/python -m pytest tests/ -q     # 241 tests
 
-# API 不要のモックでパイプライン確認
-.venv/bin/python main.py compare "健康AIの企画" --mock --evaluate
+# Check the pipeline end-to-end with a mock (no API needed)
+.venv/bin/python main.py compare "Design a health-AI product" --mock --evaluate
 
-# 実API（claude -p 独立起動）でサンプル取得・保存
-.venv/bin/python main.py elevate "健康AIの企画" \
+# Get and save a sample with the real API (independent claude -p launch)
+.venv/bin/python main.py elevate "Design a health-AI product" \
   --engine claude-code --agents strategist humanist differentiator --out examples/health-ai
 ```
 
-認証は環境変数で供給する（APIキーをコードに含めない）。
+Authentication is supplied via environment variables (do not put API keys in code).
 
-| 環境変数 | 用途 |
+| Environment variable | Purpose |
 |---|---|
-| `ANTHROPIC_API_KEY` | 通常の Anthropic API |
-| `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_BASE_URL` | Claude Code 互換ゲートウェイ |
-| `CLAUDE_MIN_INTERVAL_SECONDS` | リクエスト最小間隔（既定 2.0 秒。空応答対策） |
-| `CLAUDE_MAX_RETRIES` | 空応答/エラー時の再試行上限（既定 6 回。間欠的空応答対策） |
+| `ANTHROPIC_API_KEY` | Regular Anthropic API |
+| `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_BASE_URL` | Claude Code-compatible gateway |
+| `CLAUDE_MIN_INTERVAL_SECONDS` | Minimum request interval (default 2.0 s; guards against empty responses) |
+| `CLAUDE_MAX_RETRIES` | Retry limit on empty responses/errors (default 6; guards against intermittent empty responses) |
+| `CLAUDE_MAX_TOKENS` | Output-token budget shared by thinking and text (default 16384). Reasoning models can spend the budget on thinking, leaving zero text — a too-small value produces empty responses on long system prompts |
 
 ## CLI
 
 ```bash
-python main.py generate "タスク"                 # 素のAI（単発生成）, 1 call
-python main.py diverge "タスク"                  # 8エージェントで草案生成・一覧出力
-python main.py synthesize draft1.md draft2.md  # 外部草案を昇華（核心）
-python main.py elevate "タスク"                  # diverge → synthesize 一気
-python main.py compare "タスク"                  # generate vs elevate 両方出力
-python main.py compare "タスク" --evaluate       # + 品質評価（5軸+新奇度・独自性・意外性）でスコア比較
-python main.py compare "タスク" --evaluate --runs 10        # N回反復で統計集計
-python main.py compare "タスク" --evaluate --baseline best-of-n  # 帰無仮説比較
-python main.py compare "タスク" --evaluate --no-strong-claim      # 断言枠アブレーション
-python main.py compare "タスク" --evaluate --logic-check          # 最終化後に論理一貫性の復元工程
-python main.py calibrate "タスク" --mock --runs 3                 # 温度近似の誤差定量
-python main.py improve "タスク" --rounds 3                        # 昇華版→改修の草案→昇華 のループで反復改善
-python main.py improve "タスク" --rounds 3 --evaluate             # + 各ラウンド採点・頭打ちで早期停止
+python main.py generate "TASK"                    # plain AI (single-shot generation), 1 call
+python main.py diverge "TASK"                     # draft generation with 8 agents, list output
+python main.py synthesize draft1.md draft2.md   # sublate external drafts (the core)
+python main.py elevate "TASK"                     # diverge → synthesize in one go
+python main.py compare "TASK"                     # output both generate and elevate
+python main.py compare "TASK" --evaluate          # + quality evaluation (5 axes + novelty/originality/surprise) score comparison
+python main.py compare "TASK" --evaluate --runs 10        # statistical aggregation with N repeats
+python main.py compare "TASK" --evaluate --baseline best-of-n  # null-hypothesis comparison
+python main.py compare "TASK" --evaluate --no-strong-claim      # strong-claim-frame ablation
+python main.py compare "TASK" --evaluate --logic-check          # restore logical coherence after finalization
+python main.py calibrate "TASK" --mock --runs 3                 # quantify temperature-approximation error
+python main.py improve "TASK" --rounds 3                        # iterative improvement: elevated → revision drafts → sublate
+python main.py improve "TASK" --rounds 3 --evaluate             # + score each round, early-stop on plateau
 ```
 
-共通オプション: `--mock`（API不要）/ `--engine sdk|claude-code`（既定 sdk）/
-`--method two-stage|single-pass`（既定 two-stage）/
-`--agents strategist humanist`（エージェントを限定）/ `--out DIR`（成果物の保存先。省略時は
-`outputs/{タスク名}/` に自動保存。diverge / elevate / compare / improve すべて全成果物を対象）/
-`--runs N`（compare を N 回反復）/ `--baseline single|best-of-n`（比較対象）/
-`--no-strong-claim`（断言枠除去）/ `--logic-check`（論理一貫性の復元工程。既定は無効）/
-`--rounds N` / `--min-improve` / `--quality-ceiling`（improve の反復回数・頭打ちしきい値・高品位停止しきい値。高品位は既定 0.75 で有効）/
-`--output-format '<JSON>'`（出力形式の明示指定。省略時は実APIでタスクから LLM が動的に抽出）/
-`--knowledge 'TEXT'` / `--knowledge-file PATH` / `--ask-knowledge`（前提知識。素材・制約・背景情報を生成の土台として全段階に注入。相互排他。保存先 `--out/knowledge.md`）
+Common options: `--lang {en,ja,zh}` (language; default en) / `--mock` (no API needed) / `--engine sdk|claude-code` (default sdk) / `--method two-stage|single-pass` (default two-stage) / `--agents strategist humanist` (restrict agents) / `--out DIR` (save destination for artifacts; when omitted, everything is auto-saved to `outputs/{task}/` — applies to all of diverge / elevate / compare / improve) / `--runs N` (repeat compare N times) / `--baseline single|best-of-n` (comparison baseline) / `--no-strong-claim` (remove the strong-claim frame) / `--logic-check` (restore logical coherence after finalization; disabled by default) / `--rounds N` / `--min-improve` / `--quality-ceiling` (improve iteration count, plateau threshold, and quality-ceiling threshold; the quality ceiling is enabled by default at 0.75) / `--output-format '<JSON>'` (explicitly specify the output format; when omitted, the LLM dynamically extracts it from the task via the real API) / `--knowledge 'TEXT'` / `--knowledge-file PATH` / `--ask-knowledge` (prior knowledge; injects material, constraints, and background info into all stages as the foundation of generation; mutually exclusive; saved to `--out/knowledge.md`)
 
-### 出力フォーマット認識（分野ごとの形式）
+### Output-format detection (format per domain)
 
-パイプライン開始前に、タスクから期待される出力形式を LLM が動的に抽出し、全段階に注入する
-（キャッチコピーなら候補形式、分析系ならテーゼ形式、直接成果物は長さ範囲で完全性判定）。
-抽出失敗時のフォールバック・安全弁・`OutputFormat` テーブルは [docs/output-format.md](docs/output-format.md)。
+Before the pipeline starts, the LLM dynamically extracts the expected output format from the task and injects it into all stages (candidate format for catchphrases, thesis format for analytical work, and a length range for the completeness check when the output is the artifact itself). See [docs/output-format.md](docs/output-format.md) for the fallback on extraction failure, the safety valve, and the `OutputFormat` table.
 
-### 前提知識の注入（--knowledge）
+### Prior-knowledge injection (--knowledge)
 
-素材・制約・背景情報を生成の土台として全段階に注入する（fmt=形の制約と対になる内容の制約）。
-指定方法・注入範囲・保存先の詳細は [docs/knowledge.md](docs/knowledge.md)。
+Injects material, constraints, and background info into all stages as the foundation of generation (content constraints paired with fmt's form constraints). See [docs/knowledge.md](docs/knowledge.md) for how to specify it, the injection scope, and the save destination.
 
-### 昇華優位性の計測（compare）
+### Measuring sublation superiority (compare)
 
-「昇華」と「単発生成（または昇華しない最良草案選択）」を同一入力・同一評価器で走らせ、
-スコアと勝率を実測する。`--runs N` で統計集計（勝率・95%CI・効果量）を出力し、各 run の
-raw / elevated は `render_comparison.py` で比較ドキュメント化できる。
-詳細は [docs/measurement.md](docs/measurement.md)。
+Runs "sublation" and "single-shot generation (or best-draft selection without sublation)" on the same input with the same evaluator, measuring scores and win rates. `--runs N` outputs statistical aggregates (win rate, 95% CI, effect size), and each run's raw / elevated can be turned into a comparison document with `render_comparison.py`. See [docs/measurement.md](docs/measurement.md).
 
-### 反復改善（improve）
+### Iterative improvement (improve)
 
-昇華版を土台に「改修草案 → 昇華」を繰り返し磨くループ。各 round は `round_NN/` に保存され、
-`--evaluate` で高品位停止・頭打ち停止の安全弁が働く。詳細は [docs/measurement.md](docs/measurement.md)。
+A loop that repeatedly polishes the elevated artifact through "revision draft → sublation". Each round is saved under `round_NN/`, and `--evaluate` engages the quality-ceiling and plateau early-stop safety valves. See [docs/measurement.md](docs/measurement.md).
 
-### 生成エンジン（--engine）
+### Generation engine (--engine)
 
-| エンジン | 起動方式 | 用途 |
+| Engine | Launch method | Use |
 |---|---|---|
-| `sdk`（既定） | `anthropic` SDK で1プロセス内から直呼び | 通常の Anthropic API |
-| `claude-code` | 呼び出しごとに `claude -p` を独立起動 | Claude Code 互換ゲートウェイ・不安定な SDK 経路の回避 |
+| `sdk` (default) | Calls directly via the `anthropic` SDK from within one process | Regular Anthropic API |
+| `claude-code` | Launches `claude -p` independently for each call | Claude Code-compatible gateway; avoids unstable SDK paths |
 
-`claude-code` エンジンは草案・昇華推理・最終化を**それぞれ独立プロセス**で生成する
-（中間コンテキストの混線なし・打ち切り時の再試行もプロセス単位）。温度はシステムプロンプト
-内の指示文で近似する（`温度≥0.5` → 発散重視 / `温度<0.5` → 一貫性重視）。
-SDK 経由の空応答は `CLAUDE_MAX_RETRIES`（既定6）で再試行する。
+The `claude-code` engine generates drafts, sublation reasoning, and finalization in **separate processes** (no cross-talk of intermediate context; retries on truncation are also per-process). Temperature is approximated by instructions in the system prompt (`temperature≥0.5` → favor divergence / `temperature<0.5` → favor coherence). Empty responses over the SDK are retried up to `CLAUDE_MAX_RETRIES` (default 6).
 
-## インストールとファサード skill
+## Installation and the facade skill
 
-`./install.sh` で Claude Code から呼べるようにする（agents + skill を symlink 設置）。
+`./install.sh` makes it callable from Claude Code (installs agents + the skill via symlinks).
 
 ```bash
-./install.sh            # グローバル: ~/.claude/agents/ + ~/.claude/skills/
-./install.sh --local    # プロジェクト: .claude/agents/ + .claude/skills/
+./install.sh            # global: ~/.claude/agents/ + ~/.claude/skills/
+./install.sh --local    # project: .claude/agents/ + .claude/skills/
 ./install.sh --uninstall
 ```
 
-インストールされるもの:
-- **8クリエイターエージェント**（`strategist` 等）— Agent tool / @-mention で起動可能
-- **`elevate-draft-engine` skill（ファサード）** — `main.py` への薄い呼び出しインターフェース
+What gets installed:
+- **8 creator agents** (`strategist`, etc.) — launchable via Agent tool / @-mention
+- **`elevate-draft-engine` skill (facade)** — a thin calling interface to `main.py`
 
-**ファサード skill の設計**: elevate の skill は**オーケストレーターではなくファサード**である。
-オーケストレーション（DIVERGE → 昇華推理 → 最終化、完全性ガード、温度制御、`claude -p` 安定経路）
-はすべて Python エンジン側にあり、skill は `main.py` を起動して結果を報告するだけ。エンジンを
-バイパスしてサブエージェントを直接昇華するのはダウングレードなので行わない。
+**Facade-skill design**: the elevate skill is a **facade, not an orchestrator**. All orchestration (DIVERGE → sublation reasoning → finalization, the completeness guard, temperature control, the stable `claude -p` path) lives in the Python engine; the skill only launches `main.py` and reports the result. Bypassing the engine to sublate subagents directly is a downgrade — do not do it.
 
 ```bash
-# 呼び出し例（Claude Code 内で Skill: elevate-draft-engine を使用）
-# Args: {"task": "健康AIの企画", "agents": ["strategist", "humanist", "differentiator"]}
+# Example call (using Skill: elevate-draft-engine inside Claude Code)
+# Args: {"task": "Design a health-AI product", "agents": ["strategist", "humanist", "differentiator"]}
 ```
 
 ## Python API
 
-`elevate.DraftEngine` で generate / diverge / synthesize / elevate を直接呼べる
-（外部草案もそのまま昇華できる）。使用例は [docs/api.md](docs/api.md)。
+`elevate.DraftEngine` lets you call generate / diverge / synthesize / elevate directly (external drafts can also be sublated as-is). See [docs/api.md](docs/api.md) for usage examples.
 
-## リポジトリ構成
+## Repository structure
 
 ```
 elevate-draft-engine/
-├── agents/                     # エージェント正本（1エージェント=1ファイル、frontmatter + ペルソナ）
+├── agents/                     # agent source of truth (1 agent = 1 file, frontmatter + persona)
 │   ├── designer.md
 │   ├── differentiator.md
 │   ├── futurist.md
@@ -255,42 +233,38 @@ elevate-draft-engine/
 │   └── visionary.md
 ├── elevate/
 │   ├── __init__.py             # from elevate import DraftEngine, Draft
-│   └── engine.py               # DraftEngine（agents/ 読込 + synthesize）
+│   └── engine.py               # DraftEngine (reads agents/ + synthesize)
 ├── adapters/
-│   ├── claude_client.py        # Claude API クライアント（スロットル・空応答再試行込み）
-│   └── claude_code_client.py   # claude -p 独立起動（--engine claude-code）
+│   ├── claude_client.py        # Claude API client (with throttle + empty-response retry)
+│   └── claude_code_client.py   # independent claude -p launch (--engine claude-code)
 ├── evaluation/
-│   ├── evaluator.py            # 品質評価（5軸 + 掛け算統合。--evaluate 用）
-│   └── quality.py              # 品質評価の3観点（新奇度・独自性・意外性）
+│   ├── evaluator.py            # 5-axis evaluation (+ multiplicative integration. for --evaluate)
+│   └── quality.py              # quality evaluation's 3 viewpoints (novelty / originality / surprise)
 ├── skills/
-│   └── elevate-draft-engine/SKILL.md   # ファサード skill（main.py を起動。オーケストレーションは委譲）
-├── tests/                      # 184件
-├── examples/                   # 実行サンプル集（分野横断テストケース等）
-│   └── multi-domain/           # 分野横断フォーマット認識+知識注入の検証ケース
-├── docs/                       # 深掘り詳細（output-format / knowledge / measurement / api）
-├── CLAUDE.md                   # プロジェクト指示（AI向け）
-├── HISTORY.md                  # 開発履歴（ルーブリック再調整・旧実測等）
-├── install.sh                  # agents + skill を Claude Code 検出先へ symlink 設置
-├── main.py                     # 薄い CLI（generate / diverge / synthesize / elevate / compare / improve / calibrate）
-├── render_comparison.py        # compare 出力から「素AI生成 vs 昇華版」比較ドキュメントを生成
+│   └── elevate-draft-engine/SKILL.md   # facade skill (launches main.py; orchestration is delegated)
+├── tests/                      # 241 tests
+├── examples/                   # execution samples (cross-domain test cases, etc.)
+│   └── multi-domain/           # cross-domain format-detection + knowledge-injection verification cases
+├── docs/                       # deep-dive details (output-format / knowledge / measurement / api)
+├── CLAUDE.md                   # project instructions (for AI)
+├── HISTORY.md                  # development history (rubric adjustments, old measurements, etc.)
+├── install.sh                  # symlink agents + skill into Claude Code detection paths
+├── main.py                     # thin CLI (generate / diverge / synthesize / elevate / compare / improve / calibrate)
+├── render_comparison.py        # generate "plain AI vs elevated" comparison docs from compare output
 ├── requirements.txt
 └── README.md
 ```
 
-設計の要点（詳細はコードのコメント参照）:
-- **完全性ガード（broken output → regenerate）**: 打ち切り/不完全は再生成（最大3回）、直らなければ明示的失敗
-- **成果物のファイル逐次保存（既定）**: `--out` を省略すると `outputs/{タスク名}/` に全成果物（input / draft_{agent} / reconciliation / raw / elevated / evaluation_* / measurement）を自動保存する。draft は生成前に空の `draft_{agent}.md` として作られ、生成中に逐次追記される。全8草案の完了を待たずにファイルが育つため、途中で失敗しても生成済み分は消えない。打ち切りで再生成するときはファイルを空に戻してから再開する。claude-code エンジンは `claude -p --output-format stream-json` の累積テキスト差分を `on_chunk` で流す（SDK エンジンは全文が揃った時点で一括書き込み）
-- **昇華推理の完全性は長さ基準**（最小30字）: 昇華推理は「思考の土台」で文終端記号で終わらないため
-- **最終化は止揚推理だけを読み**、中間思考（草案同士の比較・弁証法の手続き説明）が成果物に漏れない
+Design essentials (details in the code comments):
+- **Completeness guard (broken output → regenerate)**: truncation/incompleteness triggers regeneration (up to 3 times); if it does not recover, fail explicitly
+- **Incremental file saving of artifacts (default)**: when `--out` is omitted, all artifacts (input / draft_{agent} / reconciliation / raw / elevated / evaluation_* / measurement) are auto-saved under `outputs/{task}/`. Each draft is created as an empty `draft_{agent}.md` before generation and appended to incrementally while being generated. Files grow without waiting for all 8 drafts to finish, so a mid-way failure does not lose what was already generated. When regenerating after truncation, the file is emptied before restarting. The claude-code engine streams the cumulative text delta of `claude -p --output-format stream-json` via `on_chunk` (the SDK engine writes everything at once when the full text is ready)
+- **Sublation-reasoning completeness is length-based** (minimum 30 characters): sublation reasoning is a "foundation of thought" and does not end with a sentence-terminal mark
+- **Finalization reads only the sublation reasoning**, so intermediate thinking (comparisons between drafts, procedural explanation of the dialectic) never leaks into the artifact
 
-## 制約と失敗モード
+## Constraints and failure modes
 
-- **昇華優位性は実測で検証する**: 「昇華が単発生成を上回る」は設計目標。実測記録は [HISTORY.md](./HISTORY.md) の実測記録セクションに一元管理している。`compare --runs N` で n を積んで検証し、勝率 50% を下回る結果も正常な知見として開示する。
-- **コスト**: DIVERGE（8草案）+ aufheben + finalize は単発生成の約10回分の API 呼び出しになる。
-  優位性の検証はそのコストに見合うタスクに限るのが実用的である。
-- **温度近似**: `claude-code` エンジンでは温度をシステムプロンプトの指示文で近似する
-  （SDK 直呼びの空応答回避のため）。数値としての温度再現性はない。
-- **評価の系統**: `--evaluate` の評価は生成と独立した評価エンジン（evaluation/）で行うが、
-  評価モデルが生成モデルと同系である限り、完全な独立評価ではない。結果は傾向として読む。
-- **アブレーションの範囲**: `--no-strong-claim` は枠の有無だけを変える。枠の貢献度が正にも負にも
-  出る可能性があり、どちらの結果もそのまま報告する。
+- **Sublation superiority is verified by measurement**: "sublation beats single-shot generation" is a design goal. Measurement records are managed centrally in the measurement-records section of [HISTORY.md](./HISTORY.md). Accumulate n with `compare --runs N` to verify, and disclose results below a 50% win rate as a normal finding.
+- **Cost**: DIVERGE (8 drafts) + aufheben + finalize amounts to roughly 10× the API calls of a single-shot generation. In practice, verifying superiority is only worthwhile for tasks that justify that cost.
+- **Temperature approximation**: the `claude-code` engine approximates temperature with instructions in the system prompt (to avoid empty responses from direct SDK calls). There is no reproducibility of temperature as a number.
+- **Evaluation lineage**: the evaluation of `--evaluate` runs in an evaluation engine (evaluation/) independent of generation, but as long as the evaluation model is from the same lineage as the generation model, it is not a fully independent evaluation. Read the results as a tendency.
+- **Ablation scope**: `--no-strong-claim` changes only the presence/absence of the frame. The frame's contribution can come out positive or negative, and either result is reported as is.

@@ -96,6 +96,50 @@ def test_api_error_then_empty_then_success():
     assert messages.calls == 3
 
 
+def test_generation_uses_roomy_max_tokens_for_gateway_reasoning():
+    """生成は思考ブロックに max_tokens を食われ空 text にならない十分な予算を使う。
+
+    実ゲートウェイ（deepseek 経由）は reasoning モデルが thinking ブロックを返す。
+    max_tokens が 4096 だと長い system（en の止揚 670字 + 「Prioritize depth」指示）で
+    思考が予算を全て消費し、text が 0 の空応答→再試行→失敗になる
+    （2026-08-10 実測: en 止揚で12連続空。ja/zh は system が短く思考も短いため成功）。
+    思考と成果物を両方収められる予算（既定 16384）で送ることを回帰テストで保証する。
+    """
+    captured: dict = {}
+
+    class RecorderMessages:
+        def create(self, **kwargs):
+            captured["max_tokens"] = kwargs.get("max_tokens")
+            return FakeResponse(["成果物"])
+
+    client = _make_client(FakeMessages([FakeResponse(["成果物"])]))
+    client.client = FakeClient(RecorderMessages())
+    client.generate(system="s", user="u")
+    assert captured["max_tokens"] >= 8192, (
+        f"生成の max_tokens が思考で枯渇し空 text になる: {captured['max_tokens']}"
+    )
+
+
+def test_default_config_uses_roomy_max_tokens(monkeypatch):
+    """環境変数未指定の既定 config も思考込みの予算を使う（4096 に戻したら回帰）。"""
+    import adapters.claude_client as mod
+
+    monkeypatch.delenv("CLAUDE_MAX_TOKENS", raising=False)
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "t")
+    cfg = mod.ClaudeClient._default_config()
+    assert cfg.max_tokens >= 8192
+
+
+def test_default_config_max_tokens_override(monkeypatch):
+    """CLAUDE_MAX_TOKENS 環境変数で max_tokens を変更できる。"""
+    import adapters.claude_client as mod
+
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "t")
+    monkeypatch.setenv("CLAUDE_MAX_TOKENS", "1000")
+    cfg = mod.ClaudeClient._default_config()
+    assert cfg.max_tokens == 1000
+
+
 def test_min_interval_throttles_requests():
     """min_interval_seconds 以上空けてリクエストが送られる（スロットル）。
 

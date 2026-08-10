@@ -1,0 +1,136 @@
+{
+  "_meta": {
+    "language": "ja",
+    "name": "日本語",
+    "note": "CLI / UI / 保存テンプレートの文字列。プロンプト（LLM向け）は prompts/ja.json。"
+  },
+
+  "console": {
+    "saved": "→ 保存: {path}",
+    "output_format_specified": "→ 出力形式（指定）: {type}（min={min}〜max={max}字）",
+    "output_format_extracted": "→ 出力形式（抽出）: {type}（min={min}〜max={max}字）",
+    "output_format_desc": "  {desc}",
+    "knowledge_input": "→ 前提知識（{src}）: {n} 字",
+    "knowledge_src_direct": "入力",
+    "knowledge_src_file": "ファイル",
+    "output_format_bad": "⚠ --output-format を解釈できません（{exc}）。フォーマット認識を無効化して続行します。",
+    "sentimentality_warning": "⚠ 感傷性の警告（{agent}）: 型通りの感情定式（末期×高齢×見捨て 等）を検出。抑制と余白で深みを確認してください。",
+    "draft_error": "⚠ エージェント「{agent}」の草案生成を失敗としてスキップ（{exc}）。残りのエージェントで継続します。",
+    "artifact_title": "=== {title} ===",
+    "draft_title": "草案: {agent}",
+    "elevated_title": "エレベート成果物（{method}）",
+    "synthesis_title": "昇華成果物（{method}）",
+    "raw_title": "素の生成（単発）",
+    "evaluation_header": "[{label}] overall={overall:.3f}（{judgment}）",
+    "evaluation_score": "    {key}: {value:.2f}",
+    "evaluation_rationale": "    根拠: {rationale}",
+    "baseline_single": "素の生成（単発）",
+    "baseline_best_of_n": "ベースライン（best-of-n）",
+    "round_progress": "[round {r}/{rounds}] 昇華版 {len} 字",
+    "run_accumulative": "[run {r}/{runs}] 累積モード: 前回の昇華版を改修した草案から昇華（elevated {len} 字）",
+    "best_draft_verbose": "    [草案: {agent}] overall={overall:.3f}",
+    "best_draft_selected": "    → 最良草案: {agent}（overall={overall:.3f}）",
+    "error": "エラー: {msg}",
+    "quality_ceiling_stop": "→ round {r} の overall {overall:.3f} ≥ 高品位しきい値 {ceiling} → 既に高品位のため改修連鎖を停止（過修正を避ける）",
+    "plateau_stop": "→ round {r} の改善 {gain:+.3f} < しきい値 {min_improve} → 頭打ちと判断し停止（過修正を避ける）",
+    "engine_done": "[{engine}] 完了（n={runs}）"
+  },
+
+  "templates": {
+    "input": "# タスク\n\n{task}",
+    "knowledge": "# 前提知識\n\n{knowledge}",
+    "format_title": "# 出力形式（OutputFormat）",
+    "format_deliverable_type": "- 成果物種別: {type}",
+    "format_description": "- 説明: {desc}",
+    "format_length": "- 出力長の範囲: {min}〜{max} 字",
+    "format_direct_yes": "はい（output_is_direct）",
+    "format_direct_no": "いいえ（成果物についての分析）",
+    "format_direct_line": "- 成果物そのもの: {value}",
+    "format_draft_header": "## 草案の形式指示（draft_guidance）",
+    "format_draft_empty": "（空 → 既存のテーゼ集中形式に従う）",
+    "format_finalize_header": "## 最終化の形式指示（finalize_guidance）"
+  },
+
+  "evaluation": {
+    "record_header": "## {label}",
+    "record_overall": "- overall: {overall:.3f}（{judgment}）",
+    "record_scores_header": "- スコア:",
+    "record_score": "  - {key}: {value:.2f}",
+    "record_rationale": "- 根拠: {rationale}",
+    "record_quality_header": "- 品質評価:",
+    "record_quality_novelty": "  - 新奇度: {value:.2f}",
+    "record_quality_originality": "  - 独自性: {value:.2f}",
+    "record_quality_surprise": "  - 意外性: {value:.2f}",
+    "record_quality_rationale": "  - 判定: {rationale}",
+    "record_best_of_n_note": "- スコア: 最良草案の選択時評価をそのまま使用（選択を再評価で上書きしない）",
+    "quality_line": "品質評価: 新奇度={novelty} / 独自性={originality} / 意外性={surprise}",
+    "generic_flag": "⚠定番"
+  },
+
+  "compare": {
+    "summary_header": "=== 比較集計 ===",
+    "baseline_stat": "{label}: {stat}",
+    "elevated_stat": "ELEVATE:            {stat}",
+    "diff_stat": "差（ELEVATE−ベースライン）: {stat}",
+    "win_rate": "勝率（ELEVATE > ベースライン）: {wins}/{runs} = {rate:.1%}",
+    "cumulative_note": "注: run_02+ は累積モード（前回の昇華版を改修した草案→昇華の改善連鎖）で測定。",
+    "cumulative_note2": "    ベースラインは毎回オリジナルタスクからの単発生成。独立run前提の統計とは別物。",
+    "win_ci": "  勝率 95%CI（Wilson）: {lo:.1%}〜{hi:.1%}",
+    "diff_ci": "  差の 95%CI（t, 両側）: {lo:+.3f}〜{hi:+.3f}",
+    "cohens_d": "  効果量（Cohen's d）: {d:+.2f}",
+    "preservation_rate": "具体性保存率（発散→昇華）: mean={mean:.1%}（n={n}）",
+    "measurement_title": "# 比較計測（--runs {runs}）",
+    "measurement_wilson": "  - 勝率 95%CI（Wilson）: {lo:.1%}〜{hi:.1%}",
+    "measurement_diff_ci": "  - 差の 95%CI（t, 両側）: {lo:+.3f}〜{hi:+.3f}",
+    "measurement_cohens_d": "  - 効果量（Cohen's d）: {d:+.2f}",
+    "measurement_cumulative_note": "- 注: run_02+ は累積モード（前回の昇華版を改修した草案→昇華の改善連鎖）で測定。",
+    "measurement_cumulative_note2": "  ベースラインは毎回オリジナルタスクからの単発生成。独立run前提の統計とは別物。",
+    "measurement_run_note": "- 各 run の成果物・評価記録は `run_NN/` に保存。",
+    "measurement_discovery": "\n> 知恵の評議会の指摘（discovery_target）: 昇華優位性は n≥10 の実測で立証せよ。勝率が 50% を下回るタスクの開示こそが誠実な主張になる。",
+    "best_of_n_requires_evaluate": "--baseline best-of-n は草案を評価して最良を選ぶため、--evaluate が必要です"
+  },
+
+  "improve": {
+    "progress_title": "# 反復改善の記録（improve）",
+    "task_line": "タスク: {task}",
+    "table_header_eval": "| round | 昇華版の長さ | overall | 前回からの改善 |",
+    "table_header_simple": "| round | 昇華版の長さ |",
+    "table_sep": "|---|---|---|---|",
+    "table_sep_simple": "|---|---|",
+    "row_eval": "| {r} | {length} | {overall:.3f} | {gain} |",
+    "row_simple": "| {r} | {length} |",
+    "note_rounds": "各ラウンドの成果物は `round_NN/` に保存（draft_* / reconciliation / elevated）。",
+    "note_loop": "round 2 以降は「前回の昇華版 → 改修の草案 → 昇華」のループで、改修草案を昇華して次の昇華版を作る（昇華版の成果が相続される）。",
+    "stop_reason": "**停止理由**: {note}"
+  },
+
+  "calibrate": {
+    "title": "# 温度近似の誤差定量（calibrate）",
+    "task_line": "タスク: {task}",
+    "engines_line": "生成エンジン: {engines}",
+    "table_header": "| エンジン | n | 長さ mean | 長さ sd | type-token比 mean | 見出し数 mean |",
+    "table_sep": "|---------|---|----------|---------|-------------------|---------------|",
+    "note": "> 温度は claude-code エンジンではシステムプロンプトの指示文で近似される（数値としての再現性はない）。上の分散が近似の誤差の実測である。"
+  },
+
+  "mock": {
+    "evaluation": "モック評価"
+  },
+
+  "render": {
+    "title": "# 比較: 素AI生成 vs 昇華版",
+    "task": "**タスク**: {task}",
+    "saved_at": "**保存先**: `{dir}`",
+    "disclaimer": "> このドキュメントは「統合優位性の実証」の材料である。**結論は数値が下すのではなく、あなたが両方を読んで判断する。** 数値は客観視のための補助であり、単発生成（約1回）と統合（8草案×温度0.7→推理→最終化、約10回）はコストが桁違いに異なる点に注意せよ。",
+    "measurement_summary": "## 計測サマリ",
+    "score": "### スコア",
+    "run_heading": "## run {idx}",
+    "raw_eval": "**素AI生成の評価**",
+    "elevated_eval": "**昇華版の評価**",
+    "raw_heading": "### 素AI生成（raw.md）",
+    "elevated_heading": "### 昇華版（elevated.md）",
+    "click_to_expand": "読む（クリックで展開）",
+    "html_raw": "素AI生成",
+    "html_elevated": "昇華版"
+  }
+}

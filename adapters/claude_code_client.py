@@ -22,9 +22,11 @@ import tempfile
 import time
 from typing import Callable
 
+from elevate import i18n
+
 # 発散（diverge / aufheben）と一貫性（finalize / generate）の温度指示。
 # claude -p は温度パラメータを持たないため、設計意図（0.9=極限の逸脱 / 0.0=一貫性）を
-# プロンプト指示で近似する。
+# プロンプト指示で近似する。ja 定数は後方互換。正本は prompts/{lang}.json の adapters 節。
 _DIVERGE_HINT = (
     "可能な限り逸脱・発散せよ。他の観点と相容れない極限まで自説を推し進め、"
     "統計的平均に回収されない過激な個別解を提示せよ。"
@@ -43,11 +45,14 @@ class ClaudeCodeClient:
 
     Generator プロトコル（generate(system, user, *, temperature)）を満たす。
     空応答・異常終了は「崩れた出力」として再試行する（broken output → regenerate 方式）。
+    lang で温度ヒントの言語を選ぶ（既定は i18n 解決）。
     """
 
-    def __init__(self, *, max_retries: int = 3, timeout: int = 600) -> None:
+    def __init__(self, *, max_retries: int = 3, timeout: int = 600, lang: str | None = None) -> None:
         self.max_retries = max_retries
         self.timeout = timeout
+        self.lang = i18n.resolve_lang(lang)
+        self.prompts: dict = i18n.load_prompts(self.lang)
 
     def generate(
         self,
@@ -65,7 +70,7 @@ class ClaudeCodeClient:
         （トークン単位ではなくバースト配送）。届いた途中までの文字列は部分文として返し、
         完全性ガード側が「打ち切り」と判定して再生成する（このときファイルは空に戻る）。
         """
-        prompt = self._build_user(system, user, temperature)
+        prompt = self._localized_user(user, temperature)
         last_err = ""
         for attempt in range(self.max_retries):
             try:
@@ -152,9 +157,22 @@ class ClaudeCodeClient:
 
     @staticmethod
     def _build_user(system: str, user: str, temperature: float | None) -> str:
-        """温度の設計意図をプロンプト指示で近似する。"""
+        """温度の設計意図をプロンプト指示で近似する（ja 定数で近似。言語は generate 側で解決）。"""
         if temperature is not None and temperature >= 0.5:
             return f"[発散を重視]\n{_DIVERGE_HINT}\n\n{user}"
         if temperature is not None and temperature < 0.5:
             return f"[一貫性を重視]\n{_CONSISTENT_HINT}\n\n{user}"
+        return user
+
+    def _localized_user(self, user: str, temperature: float | None) -> str:
+        """温度の設計意図を、このクライアントの言語のヒントで近似する。"""
+        ad = self.prompts.get("adapters", {})
+        if temperature is not None and temperature >= 0.5:
+            hint = ad.get("DIVERGE_HINT", _DIVERGE_HINT)
+            prefix = ad.get("DIVERGE_PREFIX", "[発散を重視]")
+            return f"{prefix}\n{hint}\n\n{user}"
+        if temperature is not None and temperature < 0.5:
+            hint = ad.get("CONSISTENT_HINT", _CONSISTENT_HINT)
+            prefix = ad.get("CONSISTENT_PREFIX", "[一貫性を重視]")
+            return f"{prefix}\n{hint}\n\n{user}"
         return user

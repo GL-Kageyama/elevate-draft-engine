@@ -16,6 +16,11 @@
         "name": "GL-Kageyama"
       },
       "license": "MIT",
+      "languages": [
+        "en",
+        "ja",
+        "zh"
+      ],
       "keywords": [
         "claude-code",
         "ai",

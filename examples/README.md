@@ -1,81 +1,94 @@
-# Examples — サンプル蓄積
+**Language:** [English](README.md) | [日本語](README-ja.md) | [中文](README-zh.md)
 
-タスクごとに **発散（各エージェント草案）→ 昇華（アウフヘーベン）（成果物）** の実行例を保存する。
+# Examples — accumulated samples
 
-## 使い方
+For each task, saves an execution example of **diverge (each agent's draft) → sublation (Aufheben) (artifact)**.
 
-**実行して保存:**
+## Usage
+
+**Run and save:**
 ```bash
-# 実API（ゲートウェイ）でエージェント指定・実行例を保存
-.venv/bin/python main.py elevate "タスク" \
+# Real API (gateway): specify agents and save the execution sample
+.venv/bin/python main.py elevate "TASK" \
   --agents strategist humanist differentiator --out examples/<task-dir>
 
-# モックで一気通貫確認（API不要）
-.venv/bin/python main.py compare "タスク" --mock --evaluate
+# End-to-end check with a mock (no API needed)
+.venv/bin/python main.py compare "TASK" --mock --evaluate
 ```
 
-## 各タスクのファイル
+## Files per task
 
 ```
 examples/<task-dir>/
-├── input.md                          # 元のタスク
-├── format.md                         # 抽出された出力形式（OutputFormat）
-├── knowledge.md                      # 前提知識（--knowledge 指定時のみ）
-├── drafts/                           # 各エージェントの独立草案（テーゼ集中形式）
+├── input.md                          # the original task
+├── format.md                         # extracted output format (OutputFormat)
+├── knowledge.md                      # prior knowledge (only with --knowledge)
+├── drafts/                           # each agent's independent draft (thesis-focused)
 │   ├── draft_strategist.md
 │   ├── draft_humanist.md
 │   └── ...
-└── artifacts/                        # 昇華と最終成果物
-    ├── reconciliation.md             # 止揚の下地（昇華推理）
-    └── elevated.md                   # 昇華成果物
+└── artifacts/                        # sublation and the final artifact
+    ├── reconciliation.md             # the groundwork of sublation (sublation reasoning)
+    └── elevated.md                   # the elevated artifact
 ```
 
-全ファイル Markdown（`.md`）で保存する。
+All files are saved as Markdown (`.md`).
 
-実APIはゲートウェイが間欠的に空応答を返すため、再試行上限6回
-（`CLAUDE_MAX_RETRIES`）で自己回復させる。
+The real API intermittently returns empty responses from the gateway, so it self-recovers with a retry limit of 6 (`CLAUDE_MAX_RETRIES`).
 
-## 分野横断テストケース
+## Multilingual samples (i18n)
 
-`multi-domain/` 以下で、フォーマット認識（LLM動的抽出）と前提知識注入の
-実API検証ケースを管理している。
+Under `i18n/`, samples that **actually generated** the same task (designing a morning routine) in 3 languages (en / ja / zh) are saved. Not mock — the **real answers** to the task are generated with the real API. Each language directory is an independent, complete sample (`input.md` + `drafts/` + `artifacts/`).
 
 ```bash
-# 各ケースの実行（TEST_CASES.md に全ケースのコマンドを記載）
-.venv/bin/python main.py elevate "<タスク>" --engine claude-code \
-  --agents strategist humanist differentiator storyteller \
-  --out examples/multi-domain/<key> \
-  --knowledge "<前提知識>"
+# en (default en when --lang is omitted)
+.venv/bin/python main.py elevate "Design a morning routine that makes the day productive" \
+  --out examples/i18n/morning-routine-en
+
+# ja
+.venv/bin/python main.py elevate "朝のルーティーンを設計して、一日を充実した地に足の着いたものにしよう" \
+  --lang ja --out examples/i18n/morning-routine-ja
+
+# zh
+.venv/bin/python main.py elevate "设计一个让一天高效而踏实的晨间习惯" \
+  --lang zh --out examples/i18n/morning-routine-zh
 ```
 
-実行状況は [multi-domain/TEST_CASES.md](multi-domain/TEST_CASES.md) を参照。
+Language is chosen with the `--lang {en,ja,zh}` flag (defaulting to the environment variable `ELEVATE_DRAFT_ENGINE_LANG`, then `en` if unset). Agents use `agents/{name}-{lang}.md` according to `--lang`, and the output, save templates, and quality-evaluation labels are all localized to that language.
 
-## 計測サンプル（compare）
+## Cross-domain test cases
 
-`compare --runs N --evaluate` による**昇華優位性の実証**を保存する。
-各 run の成果物は `run_NN/` サブフォルダに分離保存され、
-統計集計は `measurement.md` に残る（平均 overall 差・勝率・95%CI・効果量・具体性保存率）。
+Under `multi-domain/`, real-API verification cases for format detection (LLM dynamic extraction) and prior-knowledge injection are managed.
 
-### 比較ドキュメント（客観視のため）
+```bash
+# Run each case (TEST_CASES.md lists the commands for all cases)
+.venv/bin/python main.py elevate "<TASK>" --engine claude-code \
+  --agents strategist humanist differentiator storyteller \
+  --out examples/multi-domain/<key> \
+  --knowledge "<prior knowledge>"
+```
 
-実証は統計だけでなく、**素AI生成と昇華版を実際に読めること**が目的である。
-各サンプルディレクトリの `comparison.md`（+ `comparison.html` 横並び）で両方を並べて読める。
+See [multi-domain/TEST_CASES.md](multi-domain/TEST_CASES.md) for execution status.
+
+## Measurement samples (compare)
+
+Saves **demonstrations of sublation superiority** via `compare --runs N --evaluate`. Each run's artifacts are saved separately in `run_NN/` subfolders, and the statistical aggregate remains in `measurement.md` (mean overall difference, win rate, 95% CI, effect size, concreteness-retention rate).
+
+### Comparison documents (for objective viewing)
+
+Demonstration is not only statistics but **being able to actually read the raw AI generation and the elevated artifact**. Both can be read side by side in each sample directory's `comparison.md` (plus `comparison.html` side-by-side view).
 
 ```bash
 python render_comparison.py examples/<dir>         # comparison.md
 python render_comparison.py examples/<dir> --html  # + comparison.html
 ```
 
-## 反復改善サンプル（improve）— 昇華版を磨くループ
+## Iterative-improvement samples (improve) — a loop that polishes the elevated artifact
 
-**昇華版を改善していくループ**の成果物もここに保存する。`improve` は
-「昇華版 → 改修の草案(複数) → 昇華 → 新しい昇華版」を繰り返し、
-各 round を `round_NN/` に分離保存する（`progress.md` に全 round の評価記録）。
+Artifacts of the **loop that improves the elevated artifact** are also saved here. `improve` repeats "elevated artifact → revision draft(s) → sublation → new elevated artifact", saving each round separately under `round_NN/` (with every round's evaluation recorded in `progress.md`).
 
 ```bash
-python main.py improve "<タスク>" --rounds 5 --evaluate --out examples/<sample>
+python main.py improve "<TASK>" --rounds 5 --evaluate --out examples/<sample>
 ```
 
-`--evaluate` を付けると各ラウンドの昇華版を採点し、改善が頭打ち
-（overall の改善 < `--min-improve`）または高品位停止しきい値
-（overall ≥ `--quality-ceiling`、既定 0.75）で早期停止する。
+With `--evaluate`, each round's elevated artifact is scored, and early-stopping happens when improvement plateaus (overall improvement < `--min-improve`) or reaches the quality-ceiling threshold (overall ≥ `--quality-ceiling`, default 0.75).

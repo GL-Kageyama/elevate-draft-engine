@@ -26,7 +26,12 @@ class ClaudeConfig:
     base_url: str = ""
     generation_model: str = DEFAULT_GENERATION_MODEL
     evaluation_model: str = DEFAULT_EVALUATION_MODEL
-    max_tokens: int = 4096
+    # 実ゲートウェイ（deepseek 経由）では reasoning モデルが思考（thinking）ブロックを返す。
+    # thinking と text は max_tokens を共有するため、4096 だと長い system（en の止揚 670字 +
+    # 「Prioritize depth」指示）で思考が予算を全て使い、text が 0 の「空応答」になる
+    # （2026-08-10 実測: en 止揚で12連続空。ja/zh は system が短く思考も短いため成功）。
+    # 思考と成果物を両方収められるよう十分な予算を既定にする（CLAUDE_MAX_TOKENS で変更可）。
+    max_tokens: int = 16384
     temperature: float = 0.0
     max_retries: int = 3
     min_interval_seconds: float = 0.0  # 0 以下ならスロットル無効（実実行は main.py から 2.0 を渡す）
@@ -85,12 +90,16 @@ class ClaudeClient:
         # 空応答は間欠的（長い system で失敗率が上がる）ため、再試行上限を 6 回に強化。
         # 3 回では高負荷時に全滅し得る（2026-08-08 実測: strategist@0.7 で約2/3空応答）。
         max_retries = int(os.environ.get("CLAUDE_MAX_RETRIES", "6"))
+        # 空応答のもう一つの経路: reasoning モデルの思考が max_tokens を全て消費し text が 0 になる
+        # （2026-08-10 実測: en 止揚）。思考と text を両方収めるため既定 16384（CLAUDE_MAX_TOKENS で変更可）。
+        max_tokens = int(os.environ.get("CLAUDE_MAX_TOKENS", "16384"))
         return ClaudeConfig(
             api_key=api_key,
             auth_token=auth_token,
             base_url=base_url,
             min_interval_seconds=min_interval,
             max_retries=max_retries,
+            max_tokens=max_tokens,
         )
 
     def generate(

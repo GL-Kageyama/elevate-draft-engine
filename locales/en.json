@@ -1,0 +1,136 @@
+{
+  "_meta": {
+    "language": "en",
+    "name": "English",
+    "note": "CLI / UI / saved-template strings. LLM prompts live in prompts/en.json."
+  },
+
+  "console": {
+    "saved": "→ saved: {path}",
+    "output_format_specified": "→ output format (specified): {type} (min={min}–max={max} chars)",
+    "output_format_extracted": "→ output format (extracted): {type} (min={min}–max={max} chars)",
+    "output_format_desc": "  {desc}",
+    "knowledge_input": "→ prior knowledge ({src}): {n} chars",
+    "knowledge_src_direct": "inline",
+    "knowledge_src_file": "file",
+    "output_format_bad": "⚠ could not parse --output-format ({exc}). Format recognition disabled; continuing.",
+    "sentimentality_warning": "⚠ sentimentality warning ({agent}): detected a stock emotional formula (terminal illness × elderly × abandonment, etc.). Confirm depth through restraint and whitespace.",
+    "draft_error": "⚠ draft generation for agent “{agent}” failed and was skipped ({exc}). Continuing with the remaining agents.",
+    "artifact_title": "=== {title} ===",
+    "draft_title": "Draft: {agent}",
+    "elevated_title": "Elevated artifact ({method})",
+    "synthesis_title": "Elevated artifact ({method})",
+    "raw_title": "Raw generation (single call)",
+    "evaluation_header": "[{label}] overall={overall:.3f} ({judgment})",
+    "evaluation_score": "    {key}: {value:.2f}",
+    "evaluation_rationale": "    rationale: {rationale}",
+    "baseline_single": "Raw generation (single call)",
+    "baseline_best_of_n": "Baseline (best-of-n)",
+    "round_progress": "[round {r}/{rounds}] elevated {len} chars",
+    "run_accumulative": "[run {r}/{runs}] accumulative mode: elevating from drafts that revise the previous elevated artifact (elevated {len} chars)",
+    "best_draft_verbose": "    [draft: {agent}] overall={overall:.3f}",
+    "best_draft_selected": "    → best draft: {agent} (overall={overall:.3f})",
+    "error": "error: {msg}",
+    "quality_ceiling_stop": "→ round {r} overall {overall:.3f} ≥ quality ceiling {ceiling} → already high quality, stopping the revision chain (avoid over-correction)",
+    "plateau_stop": "→ round {r} improvement {gain:+.3f} < threshold {min_improve} → plateau reached, stopping (avoid over-correction)",
+    "engine_done": "[{engine}] done (n={runs})"
+  },
+
+  "templates": {
+    "input": "# Task\n\n{task}",
+    "knowledge": "# Prior Knowledge\n\n{knowledge}",
+    "format_title": "# Output format (OutputFormat)",
+    "format_deliverable_type": "- Deliverable type: {type}",
+    "format_description": "- Description: {desc}",
+    "format_length": "- Output length range: {min}–{max} chars",
+    "format_direct_yes": "yes (output_is_direct)",
+    "format_direct_no": "no (analysis about the deliverable)",
+    "format_direct_line": "- Deliverable itself: {value}",
+    "format_draft_header": "## Draft format guidance (draft_guidance)",
+    "format_draft_empty": "(empty → follows the existing thesis-focused format)",
+    "format_finalize_header": "## Finalization format guidance (finalize_guidance)"
+  },
+
+  "evaluation": {
+    "record_header": "## {label}",
+    "record_overall": "- overall: {overall:.3f} ({judgment})",
+    "record_scores_header": "- Scores:",
+    "record_score": "  - {key}: {value:.2f}",
+    "record_rationale": "- Rationale: {rationale}",
+    "record_quality_header": "- Quality:",
+    "record_quality_novelty": "  - novelty: {value:.2f}",
+    "record_quality_originality": "  - originality: {value:.2f}",
+    "record_quality_surprise": "  - surprise: {value:.2f}",
+    "record_quality_rationale": "  - rationale: {rationale}",
+    "record_best_of_n_note": "- Score: uses the selection-time evaluation of the best draft as-is (selection is not overwritten by re-evaluation)",
+    "quality_line": "Quality: novelty={novelty} / originality={originality} / surprise={surprise}",
+    "generic_flag": "⚠generic"
+  },
+
+  "compare": {
+    "summary_header": "=== Comparison summary ===",
+    "baseline_stat": "{label}: {stat}",
+    "elevated_stat": "ELEVATE:            {stat}",
+    "diff_stat": "Difference (ELEVATE − baseline): {stat}",
+    "win_rate": "Win rate (ELEVATE > baseline): {wins}/{runs} = {rate:.1%}",
+    "cumulative_note": "Note: run_02+ uses accumulative mode (revision chain: drafts revising the previous elevated artifact → elevation).",
+    "cumulative_note2": "    The baseline is re-measured each run from the original task in a single call. This differs from statistics assuming independent runs.",
+    "win_ci": "  Win rate 95% CI (Wilson): {lo:.1%}–{hi:.1%}",
+    "diff_ci": "  Difference 95% CI (t, two-sided): {lo:+.3f}–{hi:+.3f}",
+    "cohens_d": "  Effect size (Cohen's d): {d:+.2f}",
+    "preservation_rate": "Concreteness preservation rate (diverge→elevate): mean={mean:.1%} (n={n})",
+    "measurement_title": "# Comparison measurement (--runs {runs})",
+    "measurement_wilson": "  - Win rate 95% CI (Wilson): {lo:.1%}–{hi:.1%}",
+    "measurement_diff_ci": "  - Difference 95% CI (t, two-sided): {lo:+.3f}–{hi:+.3f}",
+    "measurement_cohens_d": "  - Effect size (Cohen's d): {d:+.2f}",
+    "measurement_cumulative_note": "- Note: run_02+ uses accumulative mode (revision chain: drafts revising the previous elevated artifact → elevation).",
+    "measurement_cumulative_note2": "  The baseline is re-measured each run from the original task in a single call. This differs from statistics assuming independent runs.",
+    "measurement_run_note": "- Each run's artifacts and evaluation records are saved under `run_NN/`.",
+    "measurement_discovery": "\n> Wisdom Council insight (discovery_target): prove elevation advantage empirically with n≥10. Disclosing tasks where the win rate falls below 50% is the honest claim.",
+    "best_of_n_requires_evaluate": "--baseline best-of-n evaluates drafts to pick the best, so --evaluate is required"
+  },
+
+  "improve": {
+    "progress_title": "# Iterative improvement log (improve)",
+    "task_line": "Task: {task}",
+    "table_header_eval": "| round | elevated length | overall | improvement since last |",
+    "table_header_simple": "| round | elevated length |",
+    "table_sep": "|---|---|---|---|",
+    "table_sep_simple": "|---|---|",
+    "row_eval": "| {r} | {length} | {overall:.3f} | {gain} |",
+    "row_simple": "| {r} | {length} |",
+    "note_rounds": "Each round's artifacts are saved under `round_NN/` (draft_* / reconciliation / elevated).",
+    "note_loop": "From round 2 onward it loops “previous elevated artifact → revision drafts → elevation”, elevating the revision drafts into the next elevated artifact (the achievements are inherited).",
+    "stop_reason": "**Stop reason**: {note}"
+  },
+
+  "calibrate": {
+    "title": "# Temperature approximation error measurement (calibrate)",
+    "task_line": "Task: {task}",
+    "engines_line": "Generation engines: {engines}",
+    "table_header": "| engine | n | length mean | length sd | type-token ratio mean | heading count mean |",
+    "table_sep": "|--------|---|------------|-----------|----------------------|-------------------|",
+    "note": "> With the claude-code engine, temperature is approximated via the system-prompt instruction (no numeric reproducibility). The variance above is the measured error of that approximation."
+  },
+
+  "mock": {
+    "evaluation": "mock evaluation"
+  },
+
+  "render": {
+    "title": "# Comparison: raw AI generation vs elevated",
+    "task": "**Task**: {task}",
+    "saved_at": "**Location**: `{dir}`",
+    "disclaimer": "> This document is material for demonstrating the elevation advantage. **The conclusion is not decided by numbers — you read both and judge.** Numbers are an aid for objectivity; note that single-call generation (≈1 call) and integration (8 drafts × temp 0.7 → reasoning → finalization, ≈10 calls) differ in cost by an order of magnitude.",
+    "measurement_summary": "## Measurement summary",
+    "score": "### Score",
+    "run_heading": "## run {idx}",
+    "raw_eval": "**Raw generation evaluation**",
+    "elevated_eval": "**Elevated evaluation**",
+    "raw_heading": "### Raw generation (raw.md)",
+    "elevated_heading": "### Elevated (elevated.md)",
+    "click_to_expand": "read (click to expand)",
+    "html_raw": "Raw generation",
+    "html_elevated": "Elevated"
+  }
+}

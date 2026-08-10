@@ -211,7 +211,7 @@ def test_cli_knowledge_flag_injects_and_saves(tmp_path, monkeypatch) -> None:
     import main
 
     gen = main.MockGenerator()
-    monkeypatch.setattr(main, "MockGenerator", lambda: gen)
+    monkeypatch.setattr(main, "MockGenerator", lambda lang=None: gen)
 
     code, out = _run_cli(
         ["elevate", "再生PETのスニーカーのキャッチコピー", "--mock", "--out", str(tmp_path),
@@ -240,7 +240,7 @@ def test_cli_knowledge_file_flag_reads_and_injects(tmp_path, monkeypatch) -> Non
     kfile.write_text("# 材料仕様\n\n再生PET 100%。\n", encoding="utf-8")
 
     gen = main.MockGenerator()
-    monkeypatch.setattr(main, "MockGenerator", lambda: gen)
+    monkeypatch.setattr(main, "MockGenerator", lambda lang=None: gen)
 
     code, out = _run_cli(
         ["elevate", "タスク", "--mock", "--out", str(tmp_path / "out"),
@@ -270,7 +270,7 @@ def test_cli_ask_knowledge_prompts_interactively(tmp_path, monkeypatch) -> None:
 
     monkeypatch.setattr("builtins.input", lambda _prompt="": "材料: 質問応答で入力。")
     gen = main.MockGenerator()
-    monkeypatch.setattr(main, "MockGenerator", lambda: gen)
+    monkeypatch.setattr(main, "MockGenerator", lambda lang=None: gen)
 
     code, out = _run_cli(
         ["elevate", "タスク", "--mock", "--out", str(tmp_path), "--ask-knowledge"]
@@ -310,7 +310,7 @@ def test_cli_compare_and_improve_accept_knowledge(tmp_path, monkeypatch) -> None
     import main
 
     gen = main.MockGenerator()
-    monkeypatch.setattr(main, "MockGenerator", lambda: gen)
+    monkeypatch.setattr(main, "MockGenerator", lambda lang=None: gen)
 
     code, _ = _run_cli(
         ["compare", "タスク", "--mock", "--out", str(tmp_path / "cmp"), "--knowledge", KNOWLEDGE]

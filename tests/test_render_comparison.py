@@ -107,6 +107,13 @@ def test_render_missing_files_graceful(tmp_path) -> None:
 def test_html_output_wraps_both_columns(tmp_path) -> None:
     out = _make_flat(tmp_path)
     md = render_comparison.render(out)
-    html = render_comparison._html_of(md)
+    # 言語別マーカーとカラムラベルは _html_of に渡す（テスト環境は conftest の ja 解決）
+    html = render_comparison._html_of(
+        md,
+        "### 素AI生成（raw.md）",
+        "### 昇華版（elevated.md）",
+        "素AI生成",
+        "昇華版",
+    )
     assert "素AI生成" in html and "昇華版" in html
     assert "flex" in html  # 横並び表示

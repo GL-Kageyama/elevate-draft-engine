@@ -41,14 +41,15 @@ class MockClient:
 # ---- QualityEvaluator 単体 ----
 
 def test_extract_json_last_block_wins():
-    text = '解説文。\n{"新奇度": 0.2, "独自性": 0.9, "意外性": 0.8, "理由": "独自"}'
-    assert _extract_json(text) == {"新奇度": 0.2, "独自性": 0.9, "意外性": 0.8, "理由": "独自"}
+    # D2: 品質評価JSONは英語キー（novelty / originality / surprise / rationale）に一本化
+    text = '解説文。\n{"novelty": 0.2, "originality": 0.9, "surprise": 0.8, "rationale": "独自"}'
+    assert _extract_json(text) == {"novelty": 0.2, "originality": 0.9, "surprise": 0.8, "rationale": "独自"}
 
 
 def test_all_quality_high_is_good():
     """全観点「高いほど良い」。評価者が新奇度を直接測り、反転はしない。"""
     client = MockClient(
-        '{"新奇度": 0.8, "独自性": 0.9, "意外性": 0.7, "理由": ""}'
+        '{"novelty": 0.8, "originality": 0.9, "surprise": 0.7, "rationale": ""}'
     )
     result = QualityEvaluator(client).evaluate("a", "t")
     assert result.novelty == pytest.approx(0.8)   # 新奇度はそのまま（高いほど良い）
@@ -76,7 +77,7 @@ def test_clamp_out_of_range():
 
 def test_evaluate_parses_quality_and_injects_rubric():
     client = MockClient(
-        '{"新奇度": 0.2, "独自性": 0.3, "意外性": 0.1, "理由": "定番レパートリーに収まる"}'
+        '{"novelty": 0.2, "originality": 0.3, "surprise": 0.1, "rationale": "定番レパートリーに収まる"}'
     )
     ev = QualityEvaluator(client)
     result = ev.evaluate("成果物テキスト", "タスク文")
@@ -94,7 +95,7 @@ def test_evaluate_parses_quality_and_injects_rubric():
 
 def test_evaluate_clamps_score():
     client = MockClient(
-        '{"新奇度": 1.5, "独自性": -0.2, "意外性": 0.7, "理由": ""}'
+        '{"novelty": 1.5, "originality": -0.2, "surprise": 0.7, "rationale": ""}'
     )
     result = QualityEvaluator(client).evaluate("a", "t")
     # 新奇度 1.5 → クランプ 1.0、独自性 -0.2 → 0.0
@@ -156,7 +157,7 @@ def test_engine_overall_multiplication():
     """品質評価が統合されると overall = 5軸overall × (α + (1−α)×品質スコア)。"""
     from evaluation.evaluator import QUALITY_ALPHA, EvaluationEngine
 
-    client = _dispatch_client('{"新奇度": 0.8, "独自性": 0.8, "意外性": 0.8, "理由": "独自"}')
+    client = _dispatch_client('{"novelty": 0.8, "originality": 0.8, "surprise": 0.8, "rationale": "独自"}')
     engine = EvaluationEngine(client, quality_evaluator=QualityEvaluator(client))
     result = engine.evaluate("成果物", "タスク")
     q_avg = (0.8 + 0.8 + 0.8) / 3.0
@@ -181,12 +182,12 @@ def test_engine_generic_answer_punished():
     """定番回答（品質スコア低）は overall が大きく下がり、独自回答は下がらない（掛け算の狙い）。"""
     from evaluation.evaluator import EvaluationEngine
 
-    generic_client = _dispatch_client('{"新奇度": 0.2, "独自性": 0.3, "意外性": 0.1, "理由": "定番"}')
+    generic_client = _dispatch_client('{"novelty": 0.2, "originality": 0.3, "surprise": 0.1, "rationale": "定番"}')
     generic = EvaluationEngine(
         generic_client, quality_evaluator=QualityEvaluator(generic_client)
     ).evaluate("成果物", "タスク").overall
 
-    original_client = _dispatch_client('{"新奇度": 0.8, "独自性": 0.9, "意外性": 0.8, "理由": "独自"}')
+    original_client = _dispatch_client('{"novelty": 0.8, "originality": 0.9, "surprise": 0.8, "rationale": "独自"}')
     original = EvaluationEngine(
         original_client, quality_evaluator=QualityEvaluator(original_client)
     ).evaluate("成果物", "タスク").overall

@@ -1,3 +1,5 @@
+**Language:** [English](api.md) | [日本語](ja/api.md) | [中文](zh/api.md)
+
 # Python API
 
 ```python
@@ -6,27 +8,28 @@ from adapters.claude_client import ClaudeClient
 
 engine = DraftEngine(ClaudeClient(), draft_temperature=0.9)
 
-# 素のAI（単発生成）— 1 call
-raw = engine.generate("健康AIの企画")
+# plain AI (single-shot generation) — 1 call
+raw = engine.generate("Design a health-AI product")
 
-# エージェント管理
-engine.list_agents()                 # 8種のデフォルトエージェント（agents/*.md から読込）
-engine.add_agent("legal", "あなたは法規制の専門家です。")
+# Agent management
+engine.list_agents()                 # 8 default agents (read from agents/*.md)
+engine.add_agent("legal", "You are an expert on regulations.")
 engine.remove_agent("storyteller")
 
-# Step 1: DIVERGE — 独立草案を生成（既定は全エージェント）
-drafts = engine.diverge("健康AIの企画")
-# draft_dir を渡すと各草案を空ファイルから生成中に逐次追記（CLI は既定で outputs/{タスク名}/ を渡す）
-drafts = engine.diverge("健康AIの企画", draft_dir=Path("examples/health-ai"))
+# Step 1: DIVERGE — generate independent drafts (all agents by default)
+drafts = engine.diverge("Design a health-AI product")
+# Passing draft_dir appends each draft incrementally from an empty file while generating
+# (the CLI passes outputs/{task}/ by default)
+drafts = engine.diverge("Design a health-AI product", draft_dir=Path("examples/health-ai"))
 
-# Step 2: SYNTHESIZE — 複数の異なる草案を昇華（核心）
-elevated = engine.synthesize(drafts)     # 内部: aufheben → finalize
-elevated = engine.synthesize(drafts, method="single-pass")   # 単発昇華
+# Step 2: SYNTHESIZE — sublate multiple different drafts (the core)
+elevated = engine.synthesize(drafts)     # internally: aufheben → finalize
+elevated = engine.synthesize(drafts, method="single-pass")   # single-shot sublation
 
-# 外部草案もそのまま昇華できる
+# External drafts can also be sublated as-is
 external = [Draft(agent="human-expert", content="..."), Draft(agent="other-model", content="...")]
 elevated = engine.synthesize(external)
 
-# 便利ラッパー: diverge → synthesize 一気
-elevated = engine.elevate("健康AIの企画")
+# Convenient wrapper: diverge → synthesize in one go
+elevated = engine.elevate("Design a health-AI product")
 ```

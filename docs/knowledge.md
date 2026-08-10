@@ -1,25 +1,25 @@
-# 前提知識の注入（--knowledge）
+**Language:** [English](knowledge.md) | [日本語](ja/knowledge.md) | [中文](zh/knowledge.md)
 
-タスクに付随する素材・制約・背景情報（材料、ターゲット層、価格帯、資料等）を
-生成の土台として全段階に注入する。fmt（形の制約）と対になる**内容の制約**であり、直交する:
+# Prior-knowledge injection (--knowledge)
+
+Injects the material, constraints, and background info attached to a task (ingredients, target audience, price range, documents, etc.) into all stages as the foundation of generation. It is the **content constraint** paired with fmt (the form constraint), and the two are orthogonal:
 
 ```
-Task → 【前提知識】 → 【このタスクの草案形式 / 最終成果物形式】（fmt）
+Task → 【prior knowledge】 → 【this task's draft format / final-artifact format】（fmt）
 ```
 
-| CLI | 動作 |
+| CLI | Behavior |
 |---|---|
-| `--knowledge "材料: 再生PET。ターゲット: 20〜30代。"` | 知識を直接指定 |
-| `--knowledge-file PATH` | 長文の資料・設計情報をファイルから読み込む |
-| `--ask-knowledge` | 起動時に対話的に入力する（Ctrl+D で終了） |
+| `--knowledge "Material: recycled PET. Target: ages 20–30."` | Specify the knowledge directly |
+| `--knowledge-file PATH` | Read long documents / design info from a file |
+| `--ask-knowledge` | Enter interactively at startup (finish with Ctrl+D) |
 
-## 注入範囲
+## Injection scope
 
-- 指定した知識は **diverge（草案）/ aufheben（止揚）/ finalize（最終化）/ generate（単発）** の
-  全生成段階にタスク直後として注入される。素材を超えた捏造を防ぎ、成果物が知識と矛盾しない。
-- **extract_format には注入しない**——形式抽出（形）はタスクのみから行い、知識（内容）を混ぜない。
-- **5軸評価には注入しない**——ポリシー固定。生成の土台の範囲外。
-- **improve の改修ラウンドに永続する**——diverge が内部で知識を付与するため、ラウンドをまたいで落ちない。
-- **compare は公平**——素の生成ベースラインにも同じ知識を注入して比較する。
-- 指定した知識は `--out/knowledge.md` に保存される（input.md / format.md と並列・透明性）。
-- 知識なし（従来挙動）は一切注入しない。3つの指定方法は相互排他。
+- The specified knowledge is injected immediately after the task into all generation stages — **diverge (draft) / aufheben (sublation) / finalize (finalization) / generate (single-shot)**. This prevents fabrication beyond the material and keeps the artifact consistent with the knowledge.
+- **Not injected into extract_format** — format extraction (form) is done from the task alone; knowledge (content) is not mixed in.
+- **Not injected into the 5-axis evaluation** — fixed policy. Outside the scope of the generation foundation.
+- **Persists across improve's revision rounds** — because diverge attaches the knowledge internally, it does not drop between rounds.
+- **compare is fair** — the same knowledge is injected into the single-shot generation baseline for comparison.
+- The specified knowledge is saved to `--out/knowledge.md` (alongside input.md / format.md, for transparency).
+- Without knowledge (previous behavior) nothing is injected. The three specification methods are mutually exclusive.

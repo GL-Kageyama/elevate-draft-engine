@@ -70,7 +70,7 @@ def test_improve_second_round_inherits_previous_elevated(tmp_path, monkeypatch) 
     生成コールの user プロンプト（改修対象タスク）を検査する。
     """
     gen = main.MockGenerator()
-    monkeypatch.setattr(main, "MockGenerator", lambda: gen)
+    monkeypatch.setattr(main, "MockGenerator", lambda lang=None: gen)
 
     code, _ = _run_improve(
         ["improve", "タスク", "--mock", "--rounds", "2", "--out", str(tmp_path)]
@@ -88,7 +88,7 @@ def test_improve_second_round_inherits_previous_elevated(tmp_path, monkeypatch) 
 def test_improve_first_round_uses_original_task(tmp_path, monkeypatch) -> None:
     """round 1 は改修対象を持たない（オリジナルタスクから発散する）。"""
     gen = main.MockGenerator()
-    monkeypatch.setattr(main, "MockGenerator", lambda: gen)
+    monkeypatch.setattr(main, "MockGenerator", lambda lang=None: gen)
 
     code, _ = _run_improve(
         ["improve", "オリジナルのタスク", "--mock", "--rounds", "2", "--out", str(tmp_path)]

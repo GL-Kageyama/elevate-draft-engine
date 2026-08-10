@@ -1,40 +1,39 @@
+**Language:** [English](CLAUDE.md) | [日本語](CLAUDE-ja.md) | [中文](CLAUDE-zh.md)
+
 # elevate-draft-engine — Project Instructions
 
-## 文書のルール
+## Document rules
 
-開発の経緯・履歴（日付付きの変更物語、再調整の経緯、旧設計との比較、過去の実測値など）は
-**README / SKILL / examples/README に書かない**。履歴は `HISTORY.md` 一箇所にまとめる。
+Development history (dated change stories, adjustment history, comparisons with past designs, past measurement values, etc.) must **not** be written in **README / SKILL / examples/README**. History is consolidated in `HISTORY.md` alone.
 
-README / SKILL / examples/README には**現在の情報**だけを書く。現在の機能説明、現在のCLI、
-現在の設計理由（日付を伴わない簡潔な理由）はOK。何かを説明するときに「かつてはXだったがYに
-変更した」「再調整(2)により…」のような導入経緯の物語が必要になったら、それは HISTORY.md に書く。
+README / SKILL / examples/README must contain **only current information**. Current feature descriptions, the current CLI, and current design rationale (brief reasons without dates) are fine. If explaining something requires a story of how it came to be — "it used to be X but was changed to Y", "per adjustment (2)…" — that goes in HISTORY.md.
 
-**どこに何があるか**:
-- `README.md`: 現在の機能・CLI・API・5軸・リポジトリ構成（概要。現在の情報のみ）
-- `docs/`: README の深掘り詳細（`output-format.md` 出力フォーマット認識 / `knowledge.md` 前提知識注入 / `measurement.md` compare・improve / `api.md` Python API）。README は各節に概要＋docs/ へのリンクを置く
-- `HISTORY.md`: 開発史（バージョン履歴、ルーブリック再調整の経緯、実測記録、知恵の評議会評価）
-- `examples/README.md`: 現在のサンプル構成と使い方（過去の削除済みサンプルは載せない）
-- `skills/elevate-draft-engine/SKILL.md`: ファサード skill（version番号は現在値のみ、バージョン履歴テーブルは HISTORY.md）
-- `.claude/agents/`・`.claude/skills/`: プロジェクト内検出用symlink（root `agents/`・`skills/` への相対リンク。エンジン本体は `agents/*.md` を直接読むためインストール不要）
-- `.claude-plugin/`: プラグイン配布定義（`/plugin marketplace add` 用）。`install.sh` は従来のグローバル/ローカル symlink 方式
+**Where things live**:
+- `README.md`: current features, CLI, API, the 5 axes, and repository structure (overview; current information only)
+- `docs/`: deep-dive details for the README (`output-format.md` output-format detection / `knowledge.md` prior-knowledge injection / `measurement.md` compare and improve / `api.md` Python API). The README places an overview plus a docs/ link in each section
+- `HISTORY.md`: development history (version history, rubric adjustment history, measurement records, Wisdom Council evaluations)
+- `examples/README.md`: current sample structure and usage (do not include past deleted samples)
+- `skills/elevate-draft-engine/SKILL.md`: the facade skill (only the current version number; the version-history table lives in HISTORY.md)
+- `.claude/agents/` and `.claude/skills/`: symlinks for in-project detection (relative links to the root `agents/` and `skills/`; no installation needed because the engine itself reads `agents/*.md` directly)
+- `.claude-plugin/`: plugin distribution definition (for `/plugin marketplace add`). `install.sh` is the conventional global/local symlink method
 
-## ポリシー固定（触らないもの）
+## Fixed policies (do not touch)
 
-- **5軸ルーブリック**: 多様性 / 統合性 / 超越性 / 誠実性 / 実用性（均等0.20）。`evaluation/evaluator.py` と `agents/*.md` は変更禁止。この5軸はポリシーであり、スコアリングの設計目標ではない。
-- **3契機弁証法**: 否定・保存・高次化の三契機は機構の中核。Aufheben の温度0.9・最終化の温度0.0 は固定。
-- **テーゼ集中形式**: 草案は 核心的主張 / 根拠 / 前提 の3要素・500〜800字。DRAFT_MAX_LENGTH=1000（創作系は3000に緩和）。
+- **5-axis rubric**: diversity / synthesis / elevation / honesty / utility (equal weights of 0.20). `evaluation/evaluator.py` and `agents/*.md` must not be changed. These five axes are policy, not scoring design goals.
+- **Three-moment dialectic**: the three moments of negate / preserve / elevate are the core of the mechanism. Aufheben temperature 0.9 and finalization temperature 0.0 are fixed.
+- **Thesis-focused format**: a draft consists of three elements — core thesis / grounds / premise — in 500–800 characters. DRAFT_MAX_LENGTH=1000 (relaxed to 3000 for creative tasks).
 
-## テスト
+## Tests
 
-`pytest tests/` で全件確認。184件（2026-08-09時点）。
+Run all tests with `pytest tests/`. 241 tests.
 
-## 破壊してはならないもの
+## Things that must not be broken
 
-- 完全性ガード（broken output → regenerate, 最大3回）
-- per-agent エラー捕捉（単一エージェントの失敗で行列全体を落とさない）
-- 安全弁（fmt 仕様の自己矛盾時に構造的に完成した最終試行を採用）
+- Completeness guard (broken output → regenerate, up to 3 times)
+- Per-agent error capture (a single agent's failure must not bring down the whole matrix)
+- Safety valve (when the fmt spec is self-contradictory, adopt the last structurally complete attempt)
 
 ## Git
 
-- `git push` はユーザーが明示的に指示したときだけ。指示なき push は禁止。
-- commit message 末尾に `Co-Authored-By: Claude <noreply@anthropic.com>` を付与。
+- Only push with `git push` when the user explicitly asks. Pushing without such a request is forbidden.
+- Append `Co-Authored-By: Claude <noreply@anthropic.com>` to the end of commit messages.

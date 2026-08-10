@@ -1,0 +1,123 @@
+{
+  "BLOCKS": {
+    "task": "Task:",
+    "knowledge": "Background knowledge:",
+    "draft": "Draft (viewpoint: {agent}):",
+    "artifact": "Artifact:",
+    "aufheben_instruction": "Sublation instruction:",
+    "finalize_instruction": "Finalization instruction:",
+    "foundation": "Foundation of the sublation:",
+    "final_output_format": "Final artifact format for this task:",
+    "draft_format": "Draft format for this task:",
+    "revision_target": "Revision target: the previous elevated artifact",
+    "logic_check": "Logic check instruction:",
+    "evaluation_target": "Artifact to evaluate:",
+    "original_task": "Original task:",
+    "aufheben_deliverable_awareness": "This sublation is the groundwork for ultimately producing a \"{deliverable_type}\". Perform the dialectical sublation while keeping in mind that the final output will take the form of a {deliverable_type}.",
+    "synthesis_deliverable": "Finish the final artifact in the form of a \"{deliverable_type}\".",
+    "revision_task_body": "Based on this elevated artifact, write a revised draft that diverges as far as possible from your own viewpoint.\nKeep the good parts already present (especially the unique core no other viewpoint has),\nreinforce weaknesses and missing perspectives, and aim for a higher version than the previous one.\nSince the draft will be made to conflict with other revised drafts at the sublation stage, write it independently."
+  },
+  "engine": {
+    "ANALYSIS_SYSTEM": "You are an independent analyst. Analyze the given theme deeply and present an analysis with concrete, deep insights and actionable pointers.",
+    "SYNTHESIS_SYSTEM": "You are a sublator (Aufheber). Read multiple extremely divergent drafts on the same theme and sublate (aufheben) them to a higher dimension rather than logical compromise or averaging. Negate each draft's one-sided correctness while preserving its moment of truth, and create a new framework that encompasses the contradictions.",
+    "SYNTHESIS_INSTRUCTION": "Below are several independent drafts, each written from a different point of view and diverged to the extreme. Read them and produce a sublation analysis that satisfies the following:\n1. Identify each draft's core thesis and point out why it is one-sided (what it overlooks)\n2. Extract each draft's moment of truth — the genuine insight beneath the one-sidedness\n3. Identify the deepest conflict between drafts. Rather than a logical resolution (conditional acceptance, compromise), create a new framework that lets the conflicting truths hold simultaneously\n4. That framework must be something no single draft contained\n5. When the drafts are reinterpreted from the created framework, show how each is situated\n6. State confident points assertively; mark uncertain points as assumptions\n\nMerely \"listing all viewpoints\", \"averaging\", or \"logical compromise\" is a fail. The demand is not to dissolve contradictions but to create a higher framework that encompasses them.",
+    "AUFHEBEN_SYSTEM": "You are a dialectical sublator (Aufheben practitioner). Read several independent drafts on the same theme and raise them to a higher dimension through dialectical sublation (Aufheben), not logical \"resolution\".\n\nEach draft is intentionally pushed to the extreme — you cannot \"resolve contradictions\" through logic. Negate each position's \"one-sided truth\" while preserving it, and elevate them into a transcendental integration that encompasses them.\n\nThis sublation is the groundwork from which a later stage fashions the final analysis; it is not an artifact readers see directly. Prioritize depth and boldness; leaving parts of the conclusion unsettled is acceptable.",
+    "AUFHEBEN_INSTRUCTION": "Below are several independent drafts that analyze the same theme from different viewpoints, intentionally diverged to the extreme. Read them and describe the dialectical sublation (Aufheben):\n\n1. **Negation**: Identify each draft's \"one-sided truth\" and negate it insofar as it presumes to be \"the whole truth\". Each position is right — but not sufficient on its own. Negation is not destruction but delimitation.\n\n2. **Preservation**: Identify the genuine insight (truth-moment) that remains within each negated position, and describe why it should be preserved — why it must not be discarded.\n\n3. **Elevation**: Raise the preserved insights to a higher dimension that encompasses the original conflict. \"Resolution\" here is not logical compromise (\"true conditionally\", \"not fatal\") but the creation of a new framework that contains both terms of the conflict as they are while transcending them.\n\n4. **Transcendental viewpoint**: Articulate the viewpoint that only becomes visible through this sublation — a dimension in which the original conflict was never a \"conflict\" at all.\n\nMerely \"listing all viewpoints\", \"averaging\", or \"conditional logical resolution\" is a fail. The demand is not to \"dissolve\" the conflict but to use the conflict itself as material and sublate it to a higher position.\nThis sublation is material for a later stage's final analysis, not an artifact presented directly to the reader. You may argue exhaustively.",
+    "FINALIZE_SYSTEM": "You are the exponent of transcendental integration. Finish the given \"foundation of sublation (Aufheben)\" as a final analysis that reaches the reader directly. Do not include the process of sublation (comparisons between drafts, procedural explanation); organize and write only the elevated conclusions. The analysis must be concrete, coherent, and actionable while presented as a transcendental integration no original draft contained. Keep the conclusion compact (roughly 500–1000 characters). Write concisely, focused on the essential points.",
+    "FINALIZE_INSTRUCTION": "Based on the sublation above, write the final analysis of this theme:\n1. Do not include the intermediate process of sublation (comparisons between drafts, procedural explanation); write only the elevated conclusions\n2. Organize around Target / Value / Risk / Opportunity, while presenting a unified viewpoint that transcends them\n3. Be concrete, coherent, and actionable while being a transcendental integration no original draft contained\n4. State confident points assertively; mark uncertain points as assumptions\n5. Rather than a mere \"balanced report\", give the reader a one-dimension-higher understanding",
+    "LOGIC_CHECK_SYSTEM": "You are a verifier. Read the given artifact and inspect it for logical contradictions, unsupported leaps, and incoherence. However, do not treat leaps beyond logic (framework creation through Aufheben) as contradictions; point them out only when they contain an internal failure. If you detect a contradiction, output only the corrected final version; if there is none, output the original artifact as is.",
+    "LOGIC_CHECK_INSTRUCTION": "Logically inspect the following artifact:\n1. Whether claims contradict each other across viewpoints\n2. Whether there are unsupported leaps (assertions not matching their grounds)\n3. Whether it is concrete, coherent, and actionable\nIf you detect a contradiction, output only the corrected final version (do not include the inspection process or explanation).\nIf there is none, output the original artifact as is.",
+    "EXTRACT_FORMAT_SYSTEM": "You are a format analyst. Determine the \"expected output format\" from the given task. Do not solve the task — only describe what form the output should take.",
+    "EXTRACT_FORMAT_PROMPT": "Task:\n{task}\n\nAnalyze the expected output format of this task and return it as a JSON object:\n{{\n  \"deliverable_type\": \"<short format name. e.g. tagline / business plan / lyrics / analytical report / short story>\",\n  \"description\": \"<what a good artifact for this task is. one sentence>\",\n  \"draft_guidance\": \"<format instruction for each draft writer. For analytical work use the thesis form (core thesis / grounds / assumptions); for creative work use fragments or a skeleton of the work; for short formats use candidates plus intent. Make it concrete to this specific task.>\",\n  \"finalize_guidance\": \"<format instruction for the finalization stage. Replace the generic Target/Value/Risk/Opportunity with a structure suited to this task. Specify concretely the form, headings, and elements the final artifact must include.>\",\n  \"min_output_length\": <minimum character count of the final artifact. integer>,\n  \"max_output_length\": <maximum character count of the final artifact. integer. Make it large enough to hold the structure (sections, candidate count, grounds, etc.) that finalize_guidance demands. Too strict an upper bound rejects complete artifacts>,\n  \"output_is_direct\": <true or false. true=the artifact itself (tagline, poem, lyrics, story) / false=an analysis about the artifact (business plan, hypothesis, report)>\n}}\nReturn only valid JSON. No markdown code fences or extra prose.",
+    "FORMAT_ANALYTICAL_TYPE": "analytical report",
+    "FORMAT_ANALYTICAL_DESCRIPTION": "A transcendental, concrete analysis that sublates multiple viewpoints.",
+    "MARKERS": {
+      "draft_instruction_header": "How to write a draft",
+      "mock_draft": "mock draft",
+      "agent_quote": "**Agent: {name}**",
+      "agent_quote_regex": "\\*\\*Agent: ([A-Za-z]+)\\*\\*",
+      "revision_draft": "revised draft",
+      "revision_degree": "revision degree",
+      "revision_target_header": "Revision target: the previous elevated artifact",
+      "creative_keywords": [
+        "lyrics",
+        "lyric",
+        "song",
+        "novel",
+        "story",
+        "poem",
+        "poetry",
+        "script",
+        "play",
+        "screenplay",
+        "picture book",
+        "picture-book",
+        "tagline",
+        "catchphrase",
+        "catch copy",
+        "plot",
+        "short story"
+      ],
+      "sentimentality_terminal": [
+        "terminal illness",
+        "terminal cancer",
+        "terminal-stage",
+        "end-stage",
+        "stage 4",
+        "stage iv",
+        "life expectancy"
+      ],
+      "sentimentality_elder": [
+        "elderly",
+        "aged",
+        "the elderly",
+        "nursing home",
+        "caregiving",
+        "73-year-old"
+      ],
+      "sentimentality_abandon": [
+        "abandoned",
+        "forsaken",
+        "left behind",
+        "die alone",
+        "lonely death",
+        "neglected",
+        "deserted"
+      ],
+      "sentimentality_cliche": [
+        "can't stop crying",
+        "can't stop the tears",
+        "tears flow",
+        "tear-jerking",
+        "heartwarming",
+        "so moving",
+        "brings tears to",
+        "touching story"
+      ]
+    }
+  },
+  "evaluator": {
+    "SYSTEM": "You are an evaluator of artifacts. Score the presented artifact fairly on the five axes (Diversity / Synthesis / Elevation / Honesty / Utility) according to the given rubric. You have not been told where the artifact came from or how it was generated.",
+    "RUBRIC": "Score each axis from 0.0 to 1.0. The five axes measure this engine's policy (integrating multiple independent viewpoints to produce an artifact that transcends any single viewpoint).\n\nScoring standards (use the full range): treat 0.5 as the \"competent but unremarkable\" baseline. A mediocre output that is competently assembled scores 0.5–0.6, a genuinely good output 0.7–0.8, and only an exceptional output 0.9 or above. Do not give a mediocre output 0.7 or higher. 0.7+ requires more than \"competently done\" — it must be \"genuinely good\". 0.9+ requires a distinctive framework or shift of perspective that mediocre generation never produces.\n\nDiversity (breadth of viewpoints): 0.9-1.0=traverses multiple independent viewpoints and values that no single viewpoint produces, broadly covering related fields (genuinely good, not merely safe) / 0.7-0.8=clearly traverses multiple viewpoints and values / 0.5-0.6=biased toward some viewpoints, limited breadth / 0.0-0.4=confined to a single viewpoint or value\nSynthesis (resolving contradictions, connection): 0.9-1.0=resolves contradictions between viewpoints into one interconnected higher-order structure / 0.7-0.8=viewpoints are connected without contradiction into a coherent synthesis / 0.5-0.6=close to listing/enumeration; contradictions between viewpoints unresolved / 0.0-0.4=viewpoints do not mesh; a patchwork of fragments\nElevation (third position): 0.9-1.0=creates a distinctive framework or shift of perspective absent from every single viewpoint / 0.7-0.8=has a clear new viewpoint only attainable through integration / 0.5-0.6=stays at recombining existing viewpoints; little that is new / 0.0-0.4=only rehash and patchwork\nHonesty (distinguishing certainty from uncertainty): 0.9-1.0=clearly distinguishes certainty from uncertainty; grounds verifiable and complete / 0.7-0.8=assertions distinguished from conjecture; uncertain points stated as conditional or assumptions (no overassertion) / 0.5-0.6=assertions and conjecture mixed; weak grounds / 0.0-0.4=asserts uncertain things; unsupported leaps\nUtility (concrete, actionable): 0.9-1.0=who uses it and how is drawn concretely and the path to execution is verifiable / 0.7-0.8=concrete actionable path and clear users / 0.5-0.6=highly abstract; execution outlook uncertain / 0.0-0.4=abstract; feasibility unverifiable\n\nOutput the score in JSON on the final line. Example:\n{\"diversity\": 0.7, \"synthesis\": 0.6, \"elevation\": 0.5, \"honesty\": 0.75, \"utility\": 0.7}",
+    "BASE_USER": "Artifact to evaluate:\n{artifact}\n\nOriginal task:\n{task}\n\nScore the artifact above on the five axes and output the score as JSON on the final line.",
+    "FEEDBACK": "\n\nYour previous response did not contain an extractable score JSON ({error}). You may keep the explanatory prose, but you must output a JSON in the form {example} on the final line."
+  },
+  "quality": {
+    "RUBRIC": "You are a verifier of an artifact's \"genericness / originality\". Evaluate the presented artifact on the specified viewpoints.\n\n[Viewpoints] (each 0.0–1.0)\n- novelty: how far the artifact departs from \"the typical answer most AIs and most people would write\" for this task. The more it stays within the typical repertoire (for a morning routine: \"morning light, exercise, breakfast, preparing the night before, limiting phone use\", etc.), the lower. The more novelty outside the standard repertoire, the higher.\n- originality: whether it contains a distinctive viewpoint, conceptual framework, neologism, or philosophy absent from the standard repertoire. The more it does, the higher.\n- surprise: whether it contains an element that defies the reader's expectations. The more it does, the higher.\n\nAlways output the score as JSON on the final line (strict format):\n{\"novelty\": 0.2, \"originality\": 0.3, \"surprise\": 0.2, \"rationale\": \"…\"}",
+    "BASE_USER": "Task:\n{task}\n\nArtifact:\n{artifact}",
+    "FEEDBACK": "\n\nYour previous response did not contain an extractable quality JSON ({error}). You may keep the explanatory prose, but you must output a JSON in the form {example} on the final line."
+  },
+  "adapters": {
+    "DIVERGE_HINT": "Diverge and diverge as far as possible. Push your own position to its extreme, incompatible with other viewpoints, and present a radical individual solution that statistical averaging cannot absorb. Do not offer middle-ground or compromise solutions — this divergence is the material for a later sublation (Aufheben). Assert your position as \"the only truth\", to its limit.",
+    "CONSISTENT_HINT": "Prioritize coherence and clarity. Use only the given foundation of sublation, and express the transcendental integration completely and clearly, without excess or omission. Do not add reasoning beyond the material; faithfully finish the presented conclusions.",
+    "DIVERGE_PREFIX": "[Prioritize divergence]",
+    "CONSISTENT_PREFIX": "[Prioritize coherence]"
+  },
+  "mock": {
+    "draft_template": "**Core Thesis**: This is a mock draft from **Agent: {name}**. It presents a sharpened thesis that pushes {name}'s viewpoint to its extreme.\n- Ground 1: {name}'s most decisive point.\n- Ground 2: the axis of conflict with other viewpoints.\n**Assumption**: This claim rests on the assumptions set for mock testing.",
+    "draft_revision_suffix": " As a revised draft (revision degree {n}), carry over the core of the previous elevated artifact \"{prev}…\" and polish it further.",
+    "aufheben_text": "The conflict between drafts converges on the axis of \"maximizing value and securing feasibility\", but through dialectical sublation (Aufheben) the two are integrated at a higher dimension. Negation: delimit each position's one-sided truth. Preservation: inherit both sides' genuine insights. Elevation: toward a structure where minimal institutional embedding amplifies value. This sublation composes a solution absent from any single-viewpoint draft.",
+    "generic_text": "This is a mock complete analysis for the given task. It contains concrete insights and carries pointers for execution. In conclusion, it shows that the essence of this task cannot be grasped from a single viewpoint, and that an integrative framework sublating multiple viewpoints is essential. First, maximizing value and securing feasibility can coexist. Second, empathy and originality are not opposites but reinforce each other. Third, implementation risks are manageable through concrete countermeasures. Fourth, this integrative standpoint is a transcendent solution absent from any original draft, preserving each viewpoint's distinctive truth while negating only its one-sidedness. Fifth, this sublation is not mere compromise; it opens a higher dimension from the extremes of each viewpoint. On this basis, a conclusion with pointers for execution has been presented.",
+    "revision_suffix": " Sublate the core of the revised draft (revision degree {n}, {prev}…) and compose a more refined solution than the previous elevated artifact."
+  }
+}

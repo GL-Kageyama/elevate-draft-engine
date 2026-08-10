@@ -1,7 +1,8 @@
 ---
 name: elevate-draft-engine
-description: Facade to invoke the elevate-draft-engine pipeline (diverge → aufheben → finalize). Given a task, runs the Python engine via main.py, saves input + each draft + reconciliation + elevated artifact into examples/<task>/ (or a custom dir), and reports the result. Supports elevate / improve（昇華版→改修草案→昇華の反復）/ compare（素の生成 vs 昇華の実測）. All orchestration, completeness guards, and temperature control live in the engine — this skill only calls it. Use to elevate an idea through dialectical sublation (Aufheben) of maximally-divergent creator drafts, to re-sublimate existing draft files, to iteratively refine an elevated artifact, or to measure whether aufheben beats single-shot generation.
-argument-hint: 'JSON: {"command": "elevate|improve|compare|synthesize", "task": "<タスク>", "agents": ["strategist","humanist",...], "method": "two-stage|single-pass", "engine": "claude-code|sdk|mock", "rounds": 3, "evaluate": true, "min_improve": 0.01, "quality_ceiling": 0.75, "runs": 1, "baseline": "single|best-of-n", "output_format": "<任意指定; OutputFormat の JSON。省略でタスクから LLM が動的に抽出>", "knowledge": "<任意指定; 前提知識（素材・制約・背景）。生成の全段階に注入し --out/knowledge.md に保存>", "knowledge_file": "<任意指定; 前提知識をファイルから読み込む>", "ask_knowledge": "<任意指定; 起動時に対話入力>", "save_dir": "<任意指定; 省略で examples/<slug> に自動保存>"}'
+description: Facade to invoke the elevate-draft-engine pipeline (diverge → aufheben → finalize). Given a task, runs the Python engine via main.py, saves input + each draft + reconciliation + elevated artifact into examples/<task>/ (or a custom dir), and reports the result. Supports elevate / improve (iterative refinement: previous elevated → revision drafts → elevation) / compare (measured vs single-shot generation). All orchestration, completeness guards, and temperature control live in the engine — this skill only calls it. Use to elevate an idea through dialectical sublation (Aufheben) of maximally-divergent creator drafts, to re-sublimate existing draft files, to iteratively refine an elevated artifact, or to measure whether aufheben beats single-shot generation.
+argument-hint: 'JSON: {"command": "elevate|improve|compare|synthesize", "task": "<task>", "lang": "en|ja|zh", "agents": ["strategist","humanist",...], "method": "two-stage|single-pass", "engine": "claude-code|sdk|mock", "rounds": 3, "evaluate": true, "min_improve": 0.01, "quality_ceiling": 0.75, "runs": 1, "baseline": "single|best-of-n", "output_format": "<optional; OutputFormat JSON. Omitted → LLM dynamically extracts from the task>", "knowledge": "<optional; prior knowledge (material / constraints / context). Injected into every generation stage, saved to --out/knowledge.md>", "knowledge_file": "<optional; load prior knowledge from a file>", "ask_knowledge": "<optional; prompt for prior knowledge interactively>", "save_dir": "<optional; defaults to examples/<slug>)"}'
+---
 ---
 
 # Elevate Draft Engine — Facade
@@ -43,6 +44,7 @@ Python エンジン側にある。**クリエイターエージェントをサ�
 |---|---|---|
 | `command` | `elevate` | `elevate`（発散→昇華）/ `improve`（昇華版→改修草案→昇華の反復改善）/ `compare`（素の生成 vs 昇華の実測比較）/ `synthesize`（既存草案群の昇華） |
 | `task` | （必須） | タスク（自然言語） |
+| `lang` | `en` | 実行言語（`en`/`ja`/`zh`）。エージェント定義・LLMプロンプト・CLI・保存テンプレートが全てこの言語になる。既定 `en`。`ELEVATE_DRAFT_ENGINE_LANG` 環境変数でも指定可（CLI `--lang` が最優先） |
 | `agents` | 全8体 | 招集するクリエイターエージェント（`strategist` `humanist` `differentiator` 等） |
 | `method` | `two-stage` | `two-stage`（昇華→最終化）/ `single-pass`（単発昇華） |
 | `engine` | `claude-code` | `claude-code`（`claude -p` 独立起動・安定）/ `sdk` / `mock` |
@@ -81,11 +83,19 @@ symlink されている場合は、symlink の実体があるリポジトリを�
 cd "$ENGINE_REPO"
 .venv/bin/python main.py elevate "$TASK" \
   --engine claude-code \
+  ${LANG:+--lang "$LANG"} \
   ${AGENTS:+--agents $AGENTS} \
   --method two-stage \
   ${KNOWLEDGE:+--knowledge "$KNOWLEDGE"} \
   --out "$SAVE_DIR"
 ```
+
+**言語モード**: `lang` で実行言語を選ぶ（既定 `en`、`ja`/`zh` も可）。エンジンが
+`--lang` → `ELEVATE_DRAFT_ENGINE_LANG` の順で解決し、エージェント定義（`agents/*-{lang}.md`）・
+LLMプロンプト（`prompts/{lang}.json`）・CLI/保存テンプレート（`locales/{lang}.json`）を
+全てその言語に切り替える。エージェント指定（`--agents strategist` 等）は言語非依存の
+ベース名のままで動く。ユーザーが日本語で依頼してきたら `--lang ja` を渡し、中国語なら
+`--lang zh` を渡す。
 
 - `main.py` が保存する一式は**種類ごとのフォルダに分類**される:
   `input.md`（タスク）は `--out` 直下、`knowledge.md`（前提知識。指定時のみ）も `--out` 直下（input/format と並列）、
@@ -112,13 +122,13 @@ cd "$ENGINE_REPO"
 - 既存の草案ファイル群（人間が書いた分析等）を昇華する場合は `synthesize` を使う:
 
 ```bash
-.venv/bin/python main.py synthesize "$ENGINE_REPO"/examples/foo/draft_*.md --task "タスク" --out "$SAVE_DIR"
+.venv/bin/python main.py synthesize "$ENGINE_REPO"/examples/foo/draft_*.md --task "タスク" ${LANG:+--lang "$LANG"} --out "$SAVE_DIR"
 ```
 
 - 昇華版を磨く反復改善は `improve` を使う（昇華版 → 改修の草案(複数) → 昇華 のループ。round 2 以降は前回の昇華版を各エージェントが改修し、それを昇華して次の昇華版にする）:
 
 ```bash
-.venv/bin/python main.py improve "$TASK" --rounds 3 --evaluate --out "$SAVE_DIR/improve"
+.venv/bin/python main.py improve "$TASK" --rounds 3 --evaluate ${LANG:+--lang "$LANG"} --out "$SAVE_DIR/improve"
 ```
 
   - `--evaluate` で各ラウンドの昇華版を品質評価し、(1) overall が既に `--quality-ceiling`（既定 0.75）以上なら**高品位停止**（次の改修ラウンドを作らず終了）、(2) 改善が `--min-improve`（既定 0.01）未満なら頭打ちで停止。どちらも過修正で元の良さを失わせないための機構（高品位な成果物ほど改修で壊れやすい）。停止理由は `progress.md` の「**停止理由**」に記録される。各 round は `round_NN/` に分離保存。
@@ -126,7 +136,7 @@ cd "$ENGINE_REPO"
 - 「昇華が単発生成を上回るか」の実測は `compare` を使う（generate vs elevate を**同一評価器**で採点。ブラインドのため条件ラベルは評価器に渡らない）:
 
 ```bash
-.venv/bin/python main.py compare "$TASK" --evaluate --runs 3 --out "$SAVE_DIR/comparison"
+.venv/bin/python main.py compare "$TASK" --evaluate --runs 3 ${LANG:+--lang "$LANG"} --out "$SAVE_DIR/comparison"
 ```
 
   - `--baseline best-of-n` で昇華しない最良草案選択（帰無仮説）との比較に切り替え。`--runs N` で n を積み、平均・勝率・95%CI・Cohen's d を `measurement.md` に集計する（**n=1 は統計的に無意味**。n≥10 まで集めてから優位性を論じること）。
@@ -168,8 +178,10 @@ guards, temperature control, and the improve loop live in main.py.
 
 $ARGUMENTS
 
-(Parse the JSON: command, task, agents, method, engine, rounds/evaluate/min_improve
-for improve, runs/baseline for compare, save_dir.)
+(Parse the JSON: command, task, lang (default "en"), agents, method, engine,
+rounds/evaluate/min_improve for improve, runs/baseline for compare, save_dir.
+Match the language of the task: if the task is in Japanese pass --lang ja,
+if Chinese pass --lang zh, otherwise en.)
 
 ## Procedure
 
@@ -184,10 +196,10 @@ for improve, runs/baseline for compare, save_dir.)
 1. Locate the engine repo: `ENGINE_REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"`. Confirm main.py exists there.
 2. Resolve save_dir: if omitted, `examples/<slug of task>/`.
 3. Run main.py for the requested command (run in background if it may exceed 10 minutes):
-   - `elevate`: `python main.py elevate "$TASK" --engine claude-code [--agents ...] --method two-stage [--knowledge "$KNOWLEDGE"] --out "$SAVE_DIR"`
-   - `improve`: `python main.py improve "$TASK" --rounds N [--evaluate] [--knowledge "$KNOWLEDGE"] --out "$SAVE_DIR"` — 昇華版 → 改修の草案(複数) → 昇華 の反復ループ
-   - `compare`: `python main.py compare "$TASK" --evaluate --runs N [--baseline best-of-n] [--knowledge "$KNOWLEDGE"] --out "$SAVE_DIR"` — 素の生成 vs 昇華の実測比較
-   - `synthesize`: `python main.py synthesize "$ENGINE_REPO"/examples/foo/draft_*.md --task "$TASK" [--knowledge "$KNOWLEDGE"] --out "$SAVE_DIR"`
+   - `elevate`: `python main.py elevate "$TASK" --engine claude-code [--agents ...] --method two-stage [--lang "$LANG"] [--knowledge "$KNOWLEDGE"] --out "$SAVE_DIR"`
+   - `improve`: `python main.py improve "$TASK" --rounds N [--evaluate] [--lang "$LANG"] [--knowledge "$KNOWLEDGE"] --out "$SAVE_DIR"` — 昇華版 → 改修の草案(複数) → 昇華 の反復ループ
+   - `compare`: `python main.py compare "$TASK" --evaluate --runs N [--baseline best-of-n] [--lang "$LANG"] [--knowledge "$KNOWLEDGE"] --out "$SAVE_DIR"` — 素の生成 vs 昇華の実測比較
+   - `synthesize`: `python main.py synthesize "$ENGINE_REPO"/examples/foo/draft_*.md --task "$TASK" [--lang "$LANG"] [--knowledge "$KNOWLEDGE"] --out "$SAVE_DIR"`
 4. Verify the saved files exist and are non-empty (input.md, draft_*.md, reconciliation.md, elevated.md; knowledge.md if knowledge given; improve adds progress.md / compare adds measurement.md).
 5. Report: summarize the elevated artifact — especially the sublation, the third position that no single draft contained (the Aufhebung). For improve, report the overall trajectory across rounds (is improvement visible?); for compare, report the stats (win rate, 95% CI, Cohen's d) and do not overclaim with n<10. Name the save directory.
 

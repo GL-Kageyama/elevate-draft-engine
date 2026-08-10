@@ -38,14 +38,34 @@ import sys
 from pathlib import Path
 
 from elevate import Draft, DraftEngine, OutputFormat, extract_format
-from elevate.engine import ELEVATED_MAX_LENGTH, ELEVATED_MIN_LENGTH, FINALIZE_INSTRUCTION
+from elevate import i18n
+from elevate.engine import AUFHEBEN_SYSTEM, ELEVATED_MAX_LENGTH, ELEVATED_MIN_LENGTH, FINALIZE_INSTRUCTION
 from elevate.engine import _detect_sentimentality
+
+
+def _loc(lang: str | None) -> dict:
+    """ロケール辞書を取得する（lang 未指定は i18n 解決＝既定 en）。"""
+    return i18n.load_locale(i18n.resolve_lang(lang))
+
+
+def _t(loc: dict, section: str, name: str, default: str, **fmt) -> str:
+    """ロケール辞書の section.name を取得し {fmt} を適用する（無ければ default に退避）。
+
+    name という引数名にしているのは、テンプレートの書式キー（{key} 等）と衝突しないため。
+    default に渡す日本語文字列は**安全弁（フォールバック）**——正本は locales/{lang}.json
+    （i18n ストア）。実行時は常に言語別ロケールが読まれるため、default はストアにキーが
+    無い場合にだけ使われる（ja に退行しないための安全網）。
+    """
+    tmpl = loc.get(section, {}).get(name, default)
+    return tmpl.format(**fmt) if fmt else tmpl
 
 
 def _build_parser() -> argparse.ArgumentParser:
     # 共通オプションは各サブコマンドの後に置く（親パーサーとして全サブコマンドに共有）。
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--mock", action="store_true", help="API を使わずモックで実行")
+    common.add_argument("--lang", default=None, choices=["en", "ja", "zh"],
+                        help="言語（en/ja/zh。既定は ELEVATE_DRAFT_ENGINE_LANG 環境変数、なければ en）")
     common.add_argument("--engine", default="sdk", choices=["sdk", "claude-code"], help="生成エンジン（既定 sdk。claude-code は claude -p 起動で安定）")
     common.add_argument("--method", default="two-stage", choices=["two-stage", "single-pass"], help="昇華方式（既定 two-stage）")
     common.add_argument("--agents", nargs="+", default=None, help="使用するエージェント（既定: 全エージェント）")
@@ -133,27 +153,36 @@ def _build_parser() -> argparse.ArgumentParser:
 _PERSONA_NAME_RE = re.compile(r"You are the \*\*([A-Za-z]+)\*\*")
 
 
-def _mock_revision_marker(user: str) -> str:
-    """改修ラウンド（前回の昇華版を磨く）の改善マーカーを返す。
-
-    改修草案を含む user プロンプトを生成する段（止揚推理・最終化・単発昇華）が、既に読まれた
-    改修度（改修度N）を引き継ぎ +1 して出力に埋め込む。MockEvaluator が昇華版に残った
-    改修度の最大値で加点するため、昇華版が磨かれるごとに overall が上昇し、改善が可視化
-    できる（round 1 は改修対象を持たず空文字 → 素の生成と同点）。
-    改修ラウンド以外は空文字を返し、モック出力の従来形状を一切変えない。
-    """
-    if "改修草案" not in user:
-        return ""
-    prev_core = user.split("改修草案", 1)[1][:40]
-    n = user.count("改修度") + 1
-    return f" 改修草案の骨子（改修度{n}、{prev_core}…）を昇華し、前回の昇華版より精緻な解を構成する。"
-
-
 class MockGenerator:
-    """決定的なモック応答を返す。完全性ガードを通過する文形にしている。"""
+    """決定的なモック応答を返す。完全性ガードを通過する文形にしている。
 
-    def __init__(self) -> None:
+    応答文と検出マーカーは prompts/{lang}.json の mock 節・MARKERS から言語別に取得する
+    （en=英語 / ja=日本語 / zh=中国語。既定は i18n 解決）。ペルソナ名の抽出は
+    「You are the **Name**」テンプレートに依存するため、エージェントファイルは
+    全言語でこのテンプレートを維持する（エージェントIDは言語非依存）。
+    """
+
+    def __init__(self, lang: str | None = None) -> None:
+        self.lang = i18n.resolve_lang(lang)
+        self.prompts: dict = i18n.load_prompts(self.lang)
+        self.mk: dict = self.prompts["engine"]["MARKERS"]
+        self.mock: dict = self.prompts.get("mock", {})
         self.calls: list[tuple[str, str, float | None]] = []
+
+    def _mock_revision_marker(self, user: str) -> str:
+        """改修ラウンド（前回の昇華版を磨く）の改善マーカーを返す（言語別テンプレート）。
+
+        改修草案を含む user プロンプトを生成する段（止揚推理・最終化・単発昇華）が、既に読まれた
+        改修度（改修度N / revision degree N）を引き継ぎ +1 して出力に埋め込む。
+        MockEvaluator が昇華版に残った改修度の最大値で加点するため、昇華版が磨かれるごとに
+        overall が上昇し、改善が可視化できる（round 1 は改修対象を持たず空文字 → 素の生成と同点）。
+        改修ラウンド以外は空文字を返し、モック出力の従来形状を一切変えない。
+        """
+        if self.mk["revision_draft"] not in user:
+            return ""
+        prev_core = user.split(self.mk["revision_draft"], 1)[1][:40]
+        n = user.count(self.mk["revision_degree"]) + 1
+        return self.mock["revision_suffix"].format(n=n, prev=prev_core)
 
     def generate(
         self,
@@ -165,56 +194,42 @@ class MockGenerator:
     ) -> str:
         self.calls.append((system, user, temperature))
         # エージェント草案: 観点名を込めたモック草案を返す
-        # 「草案の作り方」で検出する（テーゼ集中形式の組み込みエージェントに
+        # 言語別の「草案の作り方」見出しで検出する（テーゼ集中形式の組み込みエージェントに
         # 共通するマーカーで、ペルソナ名（You are the **Name**）と合わせて安定に識別できる）。
-        if "草案の作り方" in system:
+        if self.mk["draft_instruction_header"] in system:
             m = _PERSONA_NAME_RE.search(system)
             name = m.group(1).lower() if m else "unknown"
-            # テーゼ集中形式（核心的主張/根拠/前提）のモック草案を返す。
-            # MockEvaluator は「モック草案」と「エージェント「{name}」」で観点名を拾う。
-            text = (
-                f"【核心的主張】これはエージェント「{name}」のモック草案である。"
-                f"{name}の観点を極限まで推し進めた先鋭的テーゼを提示する。\n"
-                f"- 根拠1: {name}の最重要論点。\n"
-                f"- 根拠2: 他観点との対立軸。\n"
-                f"【前提】この主張はモックテスト用の仮定に基づく。"
-            )
+            # テーゼ集中形式（核心的主張/根拠/前提）のモック草案を返す（言語別テンプレート）。
+            # MockEvaluator は mock_draft マーカーと agent_quote パターンで観点名を拾う。
+            text = self.mock["draft_template"].format(name=name)
             # 改修ラウンド（round 2 以降）: 前回の昇華版の骨子を引き継ぐ改修草案を返す。
             # モック上、昇華版を磨くループの「改善の可視化」を再現するマーカーで、既に読まれて
-            # いる改修度（改修度N）を引き継ぎ+1して次段へ渡す（実APIの改善過程の決定的な模倣）。
-            if "改修対象: 前回の昇華版" in user:
-                prev_core = user.split("【改修対象: 前回の昇華版】", 1)[1].split("。", 1)[0][:40]
-                n = user.count("改修度") + 1
-                text += f" 改修草案（改修度{n}）として、前回の昇華版「{prev_core}…」の骨子を引き継ぎ磨き上げる。"
-        # 昇華推理（Aufheben）: 長さ基準（最小60字）を満たす止揚推理らしい文を返す
-        elif "Aufheben" in system:
-            text = (
-                "草案間の対立は「価値の最大化と実現性の担保」という軸に集約されるが、"
-                "弁証法的止揚（アウフヘーベン）により、両者は一段高い次元で統合される。"
-                "否定: 各立場の一面的真理を限定。保存: 両者の本物の洞察を継承。"
-                "高次化: 制度への最小埋込が価値を増幅する構造へ。"
-                "この昇華は単一観点の草案にはない解を構成する。"
-            )
-            text += _mock_revision_marker(user)
-        # それ以外（素の生成・単発昇華・Aufheben が system に無い実測・最終化）:
-        # 文終端記号で終わる完全な文を返す。
+            # いる改修度を引き継ぎ+1して次段へ渡す（実APIの改善過程の決定的な模倣）。
+            if self.mk["revision_target_header"] in user:
+                rev_label = self.prompts["BLOCKS"].get(
+                    "revision_target", f"【{self.mk['revision_target_header']}】"
+                )
+                prev_core = user.split(rev_label, 1)[1][:40]
+                n = user.count(self.mk["revision_degree"]) + 1
+                text += self.mock["draft_revision_suffix"].format(n=n, prev=prev_core)
+        # 昇華推理（Aufheben）: system が止揚専用プロンプトそのもののときに返す（言語別）。
+        # 「Aufheben」の文字列検査は言語非依存でない——言語別 system の表記は揺れる
+        # （ja は「アウフヘーベン」表記で Aufheben を含まない／en・zh は「揚弃（Aufheben）」等で
+        # 含む。en・zh の FINALIZE_SYSTEM は Aufheben を含むため、文字列検査だと最終化段が
+        # 止揚文（300字未満）を返し完全性ガードに落ちる。実測 2026-08-10: zh 最終化失敗）。
+        # 止揚は他段と違い ANALYSIS_SYSTEM を前置しない唯一の段なので、AUFHEBEN_SYSTEM との
+        # 完全一致で段を特定する（言語非依存・決定的。ストア値は全言語に存在し、無ければ
+        # エンジン定数にフォールバック）。
+        elif system == (self.prompts["engine"].get("AUFHEBEN_SYSTEM") or AUFHEBEN_SYSTEM):
+            text = self.mock["aufheben_text"]
+            text += self._mock_revision_marker(user)
+        # それ以外（素の生成・単発昇華・最終化・論理検査）:
+        # 文終端記号で終わる完全な文を返す（言語別）。
         # 最終成果物（elevated）はサイズ制約（ELEVATED_MIN_LENGTH=300〜MAX=1500）を持つため、
         # モックの結論も下限以上で上限以下の文にする（素の生成・論理検査も同文）。
         else:
-            text = (
-                "これは与えられたタスクに対するモックの完全な分析である。"
-                "具体的な洞察を含み、実行への手がかりを持つ。"
-                "結論として、このタスクの本質は単一の観点では捉えきれず、"
-                "複数の視点を止揚する統合的枠組みが必須であることを示す。"
-                "第一に、価値の最大化と実現可能性の担保は両立しうる。"
-                "第二に、共感と独自性は対立ではなく、相互に補強する。"
-                "第三に、実装上のリスクは具体的な対策により管理可能である。"
-                "第四に、この統合的視座は元のどの草案にも存在しなかった超越的な解であり、"
-                "各観点の固有の真理を保存しながらその一面性だけを否定する。"
-                "第五に、この止揚は単なる折衷ではなく、各観点の極端さを起点に一段高い次元を開く。"
-                "以上を踏まえ、実行への手がかりを伴う結論を提示した。"
-            )
-            text += _mock_revision_marker(user)
+            text = self.mock["generic_text"]
+            text += self._mock_revision_marker(user)
         # ストリーム追記用: 全文が揃った時点で1回だけ流す（SDK クライアントと同じ動作）
         if on_chunk is not None:
             on_chunk(text)
@@ -234,32 +249,37 @@ class MockEvaluator:
     決定的に可視化できる（5軸とも同一 base のため overall = base）。
     """
 
-    def __init__(self) -> None:
+    def __init__(self, lang: str | None = None) -> None:
+        self.lang = i18n.resolve_lang(lang)
+        self.prompts: dict = i18n.load_prompts(self.lang)
+        self.locale: dict = i18n.load_locale(self.lang)
+        self.mk: dict = self.prompts["engine"]["MARKERS"]
         self.calls: list[int] = []
 
     def evaluate(self, system: str, user: str) -> "EvaluationResult":
         from evaluation.evaluator import EvaluationResult, compute_overall
 
         self.calls.append(1)
-        if "モック草案" in system:
+        if self.mk["mock_draft"] in system:
             # エージェント草案: 名前に応じた決定的なスコア（0.5〜0.9）
-            # 「モック草案」の直後の「エージェント「{name}」」から name を取り出す
-            m = re.search(r"エージェント「([^」]+)」", system)
+            # mock_draft マーカーを含む文の直後の agent_quote パターンから name を取り出す
+            m = re.search(self.mk["agent_quote_regex"], system)
             name = m.group(1) if m else "?"
             base = 0.5 + (sum(ord(c) for c in name) % 40) / 100.0  # 0.50〜0.89
             scores = {"diversity": base, "synthesis": base, "elevation": base, "honesty": base, "utility": base}
         else:
             # 素の生成・昇華成果物: 「普通」=0.60。昇華版に残った改修度（改修度N）で加点し、
             # 改修度3で頭打ち → 素の生成相当（round 1）→ 昇華版が磨かれるごとに上昇 → 頭打ち。
-            degrees = [int(m) for m in re.findall(r"改修度(\d+)", system)]
+            degrees = [int(m) for m in re.findall(self.mk["revision_degree"] + r"(\d+)", system)]
             base = 0.60 + 0.04 * min(max(degrees, default=0), 3)  # 0.60〜0.72
             scores = {"diversity": base, "synthesis": base, "elevation": base, "honesty": base, "utility": base}
+        rationale = self.locale.get("mock_evaluation", "モック評価")
         return EvaluationResult(
             scores=scores,
             overall=compute_overall(scores),
             pass_threshold=0.60,
-            rationale="モック評価",
-            raw="モック評価",
+            rationale=rationale,
+            raw=rationale,
         )
 
     def score_judgment(self, overall: float) -> str:
@@ -274,14 +294,15 @@ def _make_engine(args: argparse.Namespace) -> DraftEngine:
     engine_args = {
         "strong_claim_frame": not args.no_strong_claim,
         "enable_logic_check": getattr(args, "logic_check", False),
+        "lang": getattr(args, "lang", None),
     }
     if args.mock:
-        return DraftEngine(MockGenerator(), **engine_args)
+        return DraftEngine(MockGenerator(lang=getattr(args, "lang", None)), **engine_args)
     if args.engine == "claude-code":
         # claude -p 経由（独立プロセス起動）。ゲートウェイ空応答に強い。
         from adapters.claude_code_client import ClaudeCodeClient
 
-        return DraftEngine(ClaudeCodeClient(), **engine_args)
+        return DraftEngine(ClaudeCodeClient(lang=getattr(args, "lang", None)), **engine_args)
     from adapters.claude_client import ClaudeClient
 
     return DraftEngine(ClaudeClient(), **engine_args)
@@ -293,34 +314,44 @@ def _make_evaluator(args: argparse.Namespace):
     mock では品質評価を統合しない（品質評価にはモックが無い。5軸評価には MockEvaluator がある）。
     実API時のみ品質評価を統合する。--no-quality で5軸のみに戻せる。
     """
+    lang = getattr(args, "lang", None)
     if args.mock:
-        return MockEvaluator()
+        return MockEvaluator(lang=lang)
     from adapters.claude_client import ClaudeClient
     from evaluation.evaluator import EvaluationEngine
     from evaluation.quality import QualityEvaluator
 
     client = ClaudeClient()
-    quality = QualityEvaluator(client) if getattr(args, "quality", True) else None
-    return EvaluationEngine(client, quality_evaluator=quality)
+    quality = QualityEvaluator(client, lang=lang) if getattr(args, "quality", True) else None
+    return EvaluationEngine(client, quality_evaluator=quality, lang=lang)
 
 
-def _parse_output_format(raw: str) -> OutputFormat:
+def _parse_output_format(raw: str, lang: str | None = None) -> OutputFormat:
     """--output-format の JSON 文字列を OutputFormat に変換する（不正なら ValueError）。
 
     extract_format と同じ検証（長さ範囲は 1 ≤ min ≤ max ≤ 100_000）を適用する。
+    指定 JSON に欠けているフィールドの既定は言語別プロンプトストアから取る
+    （deliverable_type は FORMAT_ANALYTICAL_TYPE、finalize_guidance は FINALIZE_INSTRUCTION）——
+    コード内の ja 定数にフォールバックすると en/zh 実行で日本語が漏れるため。
     """
     import json
 
+    resolved = i18n.resolve_lang(lang)
+    ep = i18n.load_prompts(resolved).get("engine", {})
     data = json.loads(raw)
     lo = int(data.get("min_output_length", ELEVATED_MIN_LENGTH))
     hi = int(data.get("max_output_length", ELEVATED_MAX_LENGTH))
     if lo < 1 or hi < lo or hi > 100_000:
         raise ValueError("不正な長さ範囲")
     return OutputFormat(
-        deliverable_type=str(data.get("deliverable_type") or "成果物"),
+        deliverable_type=str(
+            data.get("deliverable_type") or ep.get("FORMAT_ANALYTICAL_TYPE", "分析レポート")
+        ),
         description=str(data.get("description") or ""),
         draft_guidance=str(data.get("draft_guidance") or ""),
-        finalize_guidance=str(data.get("finalize_guidance") or FINALIZE_INSTRUCTION),
+        finalize_guidance=str(
+            data.get("finalize_guidance") or ep.get("FINALIZE_INSTRUCTION", FINALIZE_INSTRUCTION)
+        ),
         min_output_length=lo,
         max_output_length=hi,
         output_is_direct=_json_bool(data.get("output_is_direct"), False),
@@ -344,33 +375,35 @@ def _resolve_output_format(args: argparse.Namespace, engine: DraftEngine) -> Out
     - それ以外: `extract_format(engine.client, task)` で LLM 抽出
       （抽出失敗は FORMAT_ANALYTICAL にフォールバック——劣化ではなく既存挙動への退避）
     """
+    lang = getattr(args, "lang", None)
+    loc = _loc(lang)
     if getattr(args, "output_format", None):
         try:
-            fmt = _parse_output_format(args.output_format)
+            fmt = _parse_output_format(args.output_format, lang=engine.lang)
         except Exception as exc:
             print(
-                f"⚠ --output-format を解釈できません（{exc}）。フォーマット認識を無効化して続行します。",
+                _t(loc, "console", "output_format_bad",
+                   "⚠ --output-format を解釈できません（{exc}）。フォーマット認識を無効化して続行します。",
+                   exc=exc),
                 file=sys.stderr,
             )
             return None
-        print(
-            f"→ 出力形式（指定）: {fmt.deliverable_type} "
-            f"（min={fmt.min_output_length}〜max={fmt.max_output_length}字）"
-        )
+        print(_t(loc, "console", "output_format_specified",
+                 "→ 出力形式（指定）: {type}（min={min}〜max={max}字）",
+                 type=fmt.deliverable_type, min=fmt.min_output_length, max=fmt.max_output_length))
         if fmt.description:
-            print(f"  {fmt.description}")
+            print(_t(loc, "console", "output_format_desc", "  {desc}", desc=fmt.description))
         if args.out is not None:
             _save_format_spec(args, fmt)
         return fmt
     if args.mock:
         return None  # mock は決定的なため抽出スキップ（従来挙動）
-    fmt = extract_format(engine.client, args.task)
-    print(
-        f"→ 出力形式（抽出）: {fmt.deliverable_type} "
-        f"（min={fmt.min_output_length}〜max={fmt.max_output_length}字）"
-    )
+    fmt = extract_format(engine.client, args.task, lang=lang)
+    print(_t(loc, "console", "output_format_extracted",
+             "→ 出力形式（抽出）: {type}（min={min}〜max={max}字）",
+             type=fmt.deliverable_type, min=fmt.min_output_length, max=fmt.max_output_length))
     if fmt.description:
-        print(f"  {fmt.description}")
+        print(_t(loc, "console", "output_format_desc", "  {desc}", desc=fmt.description))
     if args.out is not None:
         _save_format_spec(args, fmt)
     return fmt
@@ -380,27 +413,33 @@ def _save_format_spec(args: argparse.Namespace, fmt: OutputFormat) -> None:
     """抽出/指定された出力形式の仕様を format.md として保存する（透明性のため）。"""
     if args.out is None:
         return
+    lang = getattr(args, "lang", None)
+    loc = _loc(lang)
+    t = _t(loc, "templates", "format_title", "# 出力形式（OutputFormat）")
+    direct = _t(loc, "templates", "format_direct_yes", "はい（output_is_direct）") if fmt.output_is_direct \
+        else _t(loc, "templates", "format_direct_no", "いいえ（成果物についての分析）")
     args.out.mkdir(parents=True, exist_ok=True)
     path = args.out / "format.md"
     lines = [
-        "# 出力形式（OutputFormat）",
+        t,
         "",
-        f"- 成果物種別: {fmt.deliverable_type}",
-        f"- 説明: {fmt.description}",
-        f"- 出力長の範囲: {fmt.min_output_length}〜{fmt.max_output_length} 字",
-        f"- 成果物そのもの: {'はい（output_is_direct）' if fmt.output_is_direct else 'いいえ（成果物についての分析）'}",
+        _t(loc, "templates", "format_deliverable_type", "- 成果物種別: {type}", type=fmt.deliverable_type),
+        _t(loc, "templates", "format_description", "- 説明: {desc}", desc=fmt.description),
+        _t(loc, "templates", "format_length", "- 出力長の範囲: {min}〜{max} 字",
+           min=fmt.min_output_length, max=fmt.max_output_length),
+        _t(loc, "templates", "format_direct_line", "- 成果物そのもの: {value}", value=direct),
         "",
-        "## 草案の形式指示（draft_guidance）",
+        _t(loc, "templates", "format_draft_header", "## 草案の形式指示（draft_guidance）"),
         "",
-        fmt.draft_guidance or "（空 → 既存のテーゼ集中形式に従う）",
+        fmt.draft_guidance or _t(loc, "templates", "format_draft_empty", "（空 → 既存のテーゼ集中形式に従う）"),
         "",
-        "## 最終化の形式指示（finalize_guidance）",
+        _t(loc, "templates", "format_finalize_header", "## 最終化の形式指示（finalize_guidance）"),
         "",
         fmt.finalize_guidance,
         "",
     ]
     path.write_text("\n".join(lines) + "\n")
-    print(f"→ 保存: {path}")
+    print(_t(loc, "console", "saved", "→ 保存: {path}", path=path))
 
 
 def _resolve_knowledge(args: argparse.Namespace) -> str | None:
@@ -427,7 +466,10 @@ def _resolve_knowledge(args: argparse.Namespace) -> str | None:
     text = text.strip()
     if not text:
         return None
-    print(f"→ 前提知識（{args.knowledge_file if getattr(args, 'knowledge_file', None) else '入力'}）: {len(text)} 字")
+    loc = _loc(getattr(args, "lang", None))
+    src = _t(loc, "console", "knowledge_src_file", "ファイル") \
+        if getattr(args, "knowledge_file", None) else _t(loc, "console", "knowledge_src_direct", "入力")
+    print(_t(loc, "console", "knowledge_input", "→ 前提知識（{src}）: {n} 字", src=src, n=len(text)))
     return text
 
 
@@ -435,10 +477,11 @@ def _save_knowledge(args: argparse.Namespace, knowledge: str | None) -> None:
     """前提知識を knowledge.md として保存する（input.md / format.md と並列）。"""
     if args.out is None or not knowledge:
         return
+    loc = _loc(getattr(args, "lang", None))
     args.out.mkdir(parents=True, exist_ok=True)
     path = args.out / "knowledge.md"
-    path.write_text(f"# 前提知識\n\n{knowledge}\n")
-    print(f"→ 保存: {path}")
+    path.write_text(_t(loc, "templates", "knowledge", "# 前提知識\n\n{knowledge}", knowledge=knowledge) + "\n")
+    print(_t(loc, "console", "saved", "→ 保存: {path}", path=path))
 
 
 def _agent_of(path: Path) -> str:
@@ -504,41 +547,49 @@ def _category(name: str) -> str | None:
 def _save(args: argparse.Namespace, name: str, text: str) -> None:
     if args.out is None:
         return
+    loc = _loc(getattr(args, "lang", None))
     args.out.mkdir(parents=True, exist_ok=True)
     cat = _category(name)
     path = (args.out / cat / f"{name}.md") if cat else (args.out / f"{name}.md")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)
-    print(f"→ 保存: {path}")
+    print(_t(loc, "console", "saved", "→ 保存: {path}", path=path))
 
 
 def _save_input(args: argparse.Namespace, task: str) -> None:
     """タスクを input.md として保存（examples/ の体裁）。"""
     if args.out is None:
         return
+    loc = _loc(getattr(args, "lang", None))
     args.out.mkdir(parents=True, exist_ok=True)
     path = args.out / "input.md"
-    path.write_text(f"# タスク\n\n{task}\n")
-    print(f"→ 保存: {path}")
+    path.write_text(_t(loc, "templates", "input", "# タスク\n\n{task}", task=task) + "\n")
+    print(_t(loc, "console", "saved", "→ 保存: {path}", path=path))
 
 
 def cmd_generate(args: argparse.Namespace) -> None:
+    loc = _loc(getattr(args, "lang", None))
     engine = _make_engine(args)
     fmt = _resolve_output_format(args, engine)
     knowledge = _resolve_knowledge(args)
     _save_knowledge(args, knowledge)
-    _print_artifact("素の生成（単発）", engine.generate(args.task, fmt=fmt, knowledge=knowledge))
+    _print_artifact(
+        _t(loc, "console", "raw_title", "素の生成（単発）"),
+        engine.generate(args.task, fmt=fmt, knowledge=knowledge),
+    )
 
 
-def _report_draft_error(agent: str, exc: Exception) -> None:
+def _report_draft_error(agent: str, exc: Exception, lang: str | None = None) -> None:
     """単一エージェントの草案生成失敗を報告し、残りのエージェントで継続する。
 
     engine.diverge が RuntimeError（上限回数連続の打ち切り/不完全）を catch したときに呼ばれる。
     1エージェントの失敗で行列や improve ループ全体を落とさないための報告口。
     """
+    loc = _loc(lang)
     print(
-        f"⚠ エージェント「{agent}」の草案生成を失敗としてスキップ（{exc}）。"
-        "残りのエージェントで継続します。",
+        _t(loc, "console", "draft_error",
+           "⚠ エージェント「{agent}」の草案生成を失敗としてスキップ（{exc}）。残りのエージェントで継続します。",
+           agent=agent, exc=exc),
         file=sys.stderr,
     )
 
@@ -549,17 +600,20 @@ def _report_draft(args: argparse.Namespace, draft: Draft) -> None:
     --out 未指定時は何も保存しないため、通知も出さない。
     感情の道具化ガード（soft）: 型通りの感情定式を検出したら警告を出す（再生成はしない）。
     """
-    if _detect_sentimentality(draft.content):
+    loc = _loc(getattr(args, "lang", None))
+    if _detect_sentimentality(draft.content, lang=getattr(args, "lang", None)):
         print(
-            f"⚠ 感傷性の警告（{draft.agent}）: 型通りの感情定式（末期×高齢×見捨て 等）を検出。"
-            "抑制と余白で深みを確認してください。",
+            _t(loc, "console", "sentimentality_warning",
+               "⚠ 感傷性の警告（{agent}）: 型通りの感情定式（末期×高齢×見捨て 等）を検出。抑制と余白で深みを確認してください。",
+               agent=draft.agent),
             file=sys.stderr,
         )
     if args.out is not None:
-        print(f"→ 保存: {args.out / 'drafts' / f'draft_{draft.agent}.md'}")
+        print(_t(loc, "console", "saved", "→ 保存: {path}", path=args.out / "drafts" / f"draft_{draft.agent}.md"))
 
 
 def cmd_diverge(args: argparse.Namespace) -> None:
+    loc = _loc(getattr(args, "lang", None))
     _resolve_out(args, args.task)
     engine = _make_engine(args)
     fmt = _resolve_output_format(args, engine)
@@ -569,13 +623,16 @@ def cmd_diverge(args: argparse.Namespace) -> None:
         args.task, agents=args.agents, fmt=fmt, knowledge=knowledge,
         draft_dir=args.out / "drafts" if args.out else None,
         on_draft=lambda d: _report_draft(args, d),
-        on_error=_report_draft_error,
+        on_error=lambda a, e: _report_draft_error(a, e, lang=getattr(args, "lang", None)),
     )
     for draft in drafts:
-        _print_artifact(f"草案: {draft.agent}", draft.content)
+        _print_artifact(
+            _t(loc, "console", "draft_title", "草案: {agent}", agent=draft.agent), draft.content
+        )
 
 
 def cmd_synthesize(args: argparse.Namespace) -> None:
+    loc = _loc(getattr(args, "lang", None))
     engine = _make_engine(args)
     fmt = _resolve_output_format(args, engine)
     knowledge = _resolve_knowledge(args)
@@ -588,11 +645,14 @@ def cmd_synthesize(args: argparse.Namespace) -> None:
     )
     if reconciliation:
         _save(args, "reconciliation", reconciliation)
-    _print_artifact(f"昇華成果物（{args.method}）", elevated)
+    _print_artifact(
+        _t(loc, "console", "synthesis_title", "昇華成果物（{method}）", method=args.method), elevated
+    )
     _save(args, "elevated", elevated)
 
 
 def cmd_elevate(args: argparse.Namespace) -> None:
+    loc = _loc(getattr(args, "lang", None))
     _resolve_out(args, args.task)
     engine = _make_engine(args)
     _save_input(args, args.task)
@@ -603,7 +663,7 @@ def cmd_elevate(args: argparse.Namespace) -> None:
         args.task, agents=args.agents, fmt=fmt, knowledge=knowledge,
         draft_dir=args.out / "drafts" if args.out else None,
         on_draft=lambda d: _report_draft(args, d),
-        on_error=_report_draft_error,
+        on_error=lambda a, e: _report_draft_error(a, e, lang=getattr(args, "lang", None)),
     )
     reconciliation, elevated = engine.synthesize_with_reconciliation(
         drafts, method=args.method, task=args.task, fmt=fmt, knowledge=knowledge,
@@ -612,78 +672,91 @@ def cmd_elevate(args: argparse.Namespace) -> None:
     )
     if reconciliation:
         _save(args, "reconciliation", reconciliation)
-    _print_artifact(f"エレベート成果物（{args.method}）", elevated)
+    _print_artifact(
+        _t(loc, "console", "elevated_title", "エレベート成果物（{method}）", method=args.method), elevated
+    )
     _save(args, "elevated", elevated)
 
 
-def _evaluate_and_report(label: str, artifact: str, task: str, evaluator, *, save_to: Path | None = None):
+def _evaluate_and_report(label: str, artifact: str, task: str, evaluator, *, save_to: Path | None = None,
+                         lang: str | None = None):
     """単回評価して報告し、結果オブジェクトを返す（統計集計は .overall で使う）。
 
     save_to 指定時は、その run の評価記録（overall・各次元・根拠）を Markdown で保存する。
     評価結果に品質評価（result.quality = QualityResult）が含まれていたら、5軸評価に加えて
     品質評価（新奇度・独自性・意外性）も表示・保存する。overall は品質評価込みの値。
     """
+    loc = _loc(lang)
     result = evaluator.evaluate(artifact, task)
-    print(f"[{label}] overall={result.overall:.3f}（{evaluator.score_judgment(result.overall)}）")
+    print(_t(loc, "console", "evaluation_header", "[{label}] overall={overall:.3f}（{judgment}）",
+             label=label, overall=result.overall, judgment=evaluator.score_judgment(result.overall)))
     for k, v in result.scores.items():
-        print(f"    {k}: {v:.2f}")
+        print(_t(loc, "console", "evaluation_score", "    {key}: {value:.2f}", key=k, value=v))
     quality = getattr(result, "quality", None)
     if quality is not None:
         from evaluation.quality import format_quality_line
 
-        print(f"    {format_quality_line(quality)}")
+        print(f"    {format_quality_line(quality, lang=lang)}")
         if quality.rationale:
-            print(f"    根拠: {quality.rationale}")
+            print(_t(loc, "console", "evaluation_rationale", "    根拠: {rationale}", rationale=quality.rationale))
     print()
     if save_to is not None:
-        _save_evaluation_record(save_to, label, result, evaluator)
+        _save_evaluation_record(save_to, label, result, evaluator, lang=lang)
     return result
 
 
-def _save_evaluation_record(path: Path, label: str, result, evaluator) -> None:
+def _save_evaluation_record(path: Path, label: str, result, evaluator, *, lang: str | None = None) -> None:
     """単一評価の記録（overall・各次元・根拠・品質評価）を Markdown で保存する。"""
+    loc = _loc(lang)
+    t = _t(loc, "evaluation", "record_header", "## {label}", label=label)
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = [
-        f"## {label}",
-        f"- overall: {result.overall:.3f}（{evaluator.score_judgment(result.overall)}）",
-        "- スコア:",
+        t,
+        _t(loc, "evaluation", "record_overall", "- overall: {overall:.3f}（{judgment}）",
+           overall=result.overall, judgment=evaluator.score_judgment(result.overall)),
+        _t(loc, "evaluation", "record_scores_header", "- スコア:"),
     ]
     for k, v in result.scores.items():
-        lines.append(f"  - {k}: {v:.2f}")
+        lines.append(_t(loc, "evaluation", "record_score", "  - {key}: {value:.2f}", key=k, value=v))
     rationale = getattr(result, "rationale", None)
     if rationale:
-        lines.append(f"- 根拠: {rationale}")
+        lines.append(_t(loc, "evaluation", "record_rationale", "- 根拠: {rationale}", rationale=rationale))
     quality = getattr(result, "quality", None)
     if quality is not None:
         lines.extend([
-            "- 品質評価:",
-            f"  - 新奇度: {quality.novelty:.2f}",
-            f"  - 独自性: {quality.originality:.2f}",
-            f"  - 意外性: {quality.surprise:.2f}",
+            _t(loc, "evaluation", "record_quality_header", "- 品質評価:"),
+            _t(loc, "evaluation", "record_quality_novelty", "  - 新奇度: {value:.2f}", value=quality.novelty),
+            _t(loc, "evaluation", "record_quality_originality", "  - 独自性: {value:.2f}", value=quality.originality),
+            _t(loc, "evaluation", "record_quality_surprise", "  - 意外性: {value:.2f}", value=quality.surprise),
         ])
         if quality.rationale:
-            lines.append(f"  - 判定: {quality.rationale}")
+            lines.append(_t(loc, "evaluation", "record_quality_rationale", "  - 判定: {rationale}",
+                            rationale=quality.rationale))
     path.write_text("\n".join(lines) + "\n")
-    print(f"→ 保存: {path}")
+    print(_t(loc, "console", "saved", "→ 保存: {path}", path=path))
 
 
-def _best_of_n(evaluator, drafts: list[Draft], task: str, *, verbose: bool = False) -> tuple[Draft, float]:
+def _best_of_n(evaluator, drafts: list[Draft], task: str, *, verbose: bool = False,
+               lang: str | None = None) -> tuple[Draft, float]:
     """帰無仮説ベースライン: 昇華せず全草案を評価し、最高 overall の草案を選ぶ。
 
     昇華（aufheben → finalize）の付加価値を分離して測るための比較対象。
     各草案の評価スコアがそのまま best-of-N の実現値になる（選ばれた草案のスコアを
     報告する。選択時の評価を再評価で上書きしない——評価は盲検化されているため）。
     """
+    loc = _loc(lang)
     best_draft = drafts[0]
     best_score = -1.0
     for draft in drafts:
         result = evaluator.evaluate(draft.content, task)
         if verbose:
-            print(f"    [草案: {draft.agent}] overall={result.overall:.3f}")
+            print(_t(loc, "console", "best_draft_verbose", "    [草案: {agent}] overall={overall:.3f}",
+                     agent=draft.agent, overall=result.overall))
         if result.overall > best_score:
             best_draft, best_score = draft, result.overall
     if verbose:
-        print(f"    → 最良草案: {best_draft.agent}（overall={best_score:.3f}）")
+        print(_t(loc, "console", "best_draft_selected", "    → 最良草案: {agent}（overall={overall:.3f}）",
+                 agent=best_draft.agent, overall=best_score))
     return best_draft, best_score
 
 
@@ -754,9 +827,12 @@ def _cohens_d(baseline: list[float], elevated: list[float]) -> float:
 
 
 def cmd_compare(args: argparse.Namespace) -> None:
+    lang = getattr(args, "lang", None)
+    loc = _loc(lang)
     task = args.task
     if args.baseline == "best-of-n" and not args.evaluate:
-        raise RuntimeError("--baseline best-of-n は草案を評価して最良を選ぶため、--evaluate が必要です")
+        raise RuntimeError(_t(loc, "compare", "best_of_n_requires_evaluate",
+                              "--baseline best-of-n は草案を評価して最良を選ぶため、--evaluate が必要です"))
     _resolve_out(args, task)
     engine = _make_engine(args)
     _save_input(args, task)
@@ -769,7 +845,8 @@ def cmd_compare(args: argparse.Namespace) -> None:
     elevated_scores: list[float] = []
     wins = 0
     preservation_rates: list[float] = []
-    baseline_label = "素の生成（単発）" if args.baseline == "single" else "ベースライン（best-of-n）"
+    baseline_label = _t(loc, "console", "baseline_single", "素の生成（単発）") \
+        if args.baseline == "single" else _t(loc, "console", "baseline_best_of_n", "ベースライン（best-of-n）")
     show_artifacts = runs == 1 or args.verbose
     # 累積モード（2026-08-09、ユーザー指示）: run_02 以降は前回の昇華版を「改修対象」として
     # 埋め込んだ改訂草案（_revision_task）から発散し、それを昇華して次の昇華版にする。
@@ -792,12 +869,15 @@ def cmd_compare(args: argparse.Namespace) -> None:
             run_args = args
 
         # run_02 以降は前回の昇華版を改修する草案（改訂草案）を書かせる（累積モード）
-        draft_task = _revision_task(task, elevated_prev) if elevated_prev is not None else task
+        draft_task = (
+            _revision_task(task, elevated_prev, lang=lang)
+            if elevated_prev is not None else task
+        )
         drafts = engine.diverge(
             draft_task, agents=run_args.agents, fmt=fmt, knowledge=knowledge,
             draft_dir=run_args.out / "drafts" if run_args.out else None,
             on_draft=lambda d: _report_draft(run_args, d),
-            on_error=_report_draft_error,
+            on_error=lambda a, e: _report_draft_error(a, e, lang=lang),
         )
         reconciliation, elevated = engine.synthesize_with_reconciliation(
             drafts, method=run_args.method, task=task, fmt=fmt, knowledge=knowledge,
@@ -810,7 +890,7 @@ def cmd_compare(args: argparse.Namespace) -> None:
         if run_args.baseline == "best-of-n":
             evaluator = _make_evaluator(run_args)
             best_draft, baseline_score = _best_of_n(
-                evaluator, drafts, task, verbose=run_args.verbose
+                evaluator, drafts, task, verbose=run_args.verbose, lang=lang
             )
             baseline = best_draft.content
         else:
@@ -824,8 +904,9 @@ def cmd_compare(args: argparse.Namespace) -> None:
         _save(run_args, "elevated", elevated)
         if elevated_prev is not None:
             print(
-                f"[run {run_num}/{runs}] 累積モード: 前回の昇華版を改修した草案から昇華"
-                f"（elevated {len(elevated)} 字）"
+                _t(loc, "console", "run_accumulative",
+                   "[run {r}/{runs}] 累積モード: 前回の昇華版を改修した草案から昇華（elevated {len} 字）",
+                   r=run_num, runs=runs, len=len(elevated))
             )
         elevated_prev = elevated
 
@@ -839,7 +920,10 @@ def cmd_compare(args: argparse.Namespace) -> None:
 
         if show_artifacts:
             _print_artifact(baseline_label, baseline)
-            _print_artifact(f"エレベート成果物（{run_args.method}）", elevated)
+            _print_artifact(
+                _t(loc, "console", "elevated_title", "エレベート成果物（{method}）", method=run_args.method),
+                elevated,
+            )
 
         if run_args.evaluate:
             evaluator = _make_evaluator(run_args)
@@ -847,18 +931,23 @@ def cmd_compare(args: argparse.Namespace) -> None:
                 baseline_result = _evaluate_and_report(
                     baseline_label, baseline, task, evaluator,
                     save_to=run_dir / "evaluations/evaluation_baseline.md" if run_dir else None,
+                    lang=lang,
                 )
                 baseline_score = baseline_result.overall
             else:  # best-of-n は選択時のスコアを報告（再評価しない）
-                print(f"[{baseline_label}] overall={baseline_score:.3f}（{evaluator.score_judgment(baseline_score)}）")
+                print(_t(loc, "console", "evaluation_header", "[{label}] overall={overall:.3f}（{judgment}）",
+                         label=baseline_label, overall=baseline_score,
+                         judgment=evaluator.score_judgment(baseline_score)))
                 print()
                 if run_dir is not None:
                     _save_baseline_score_record(
-                        run_dir / "evaluations/evaluation_baseline.md", baseline_label, baseline_score, evaluator
+                        run_dir / "evaluations/evaluation_baseline.md", baseline_label, baseline_score,
+                        evaluator, lang=lang,
                     )
             elevated_result = _evaluate_and_report(
                 "ELEVATE", elevated, task, evaluator,
                 save_to=run_dir / "evaluations/evaluation_elevated.md" if run_dir else None,
+                lang=lang,
             )
             elevated_score = elevated_result.overall
             baseline_scores.append(baseline_score)
@@ -869,62 +958,83 @@ def cmd_compare(args: argparse.Namespace) -> None:
     if args.evaluate and runs > 1:
         diffs = [e - b for b, e in zip(baseline_scores, elevated_scores)]
         summary_lines = [
-            "=== 比較集計 ===",
-            f"{baseline_label}: {_stat_summary(baseline_scores)}",
-            f"ELEVATE:            {_stat_summary(elevated_scores)}",
-            f"差（ELEVATE−ベースライン）: {_stat_summary(diffs)}",
-            f"勝率（ELEVATE > ベースライン）: {wins}/{runs} = {wins / runs:.1%}",
-            "注: run_02+ は累積モード（前回の昇華版を改修した草案→昇華の改善連鎖）で測定。",
-            "    ベースラインは毎回オリジナルタスクからの単発生成。独立run前提の統計とは別物。",
+            _t(loc, "compare", "summary_header", "=== 比較集計 ==="),
+            _t(loc, "compare", "baseline_stat", "{label}: {stat}", label=baseline_label,
+               stat=_stat_summary(baseline_scores)),
+            _t(loc, "compare", "elevated_stat", "ELEVATE:            {stat}",
+               stat=_stat_summary(elevated_scores)),
+            _t(loc, "compare", "diff_stat", "差（ELEVATE−ベースライン）: {stat}",
+               stat=_stat_summary(diffs)),
+            _t(loc, "compare", "win_rate", "勝率（ELEVATE > ベースライン）: {wins}/{runs} = {rate:.1%}",
+               wins=wins, runs=runs, rate=wins / runs),
+            _t(loc, "compare", "cumulative_note",
+               "注: run_02+ は累積モード（前回の昇華版を改修した草案→昇華の改善連鎖）で測定。"),
+            _t(loc, "compare", "cumulative_note2",
+               "    ベースラインは毎回オリジナルタスクからの単発生成。独立run前提の統計とは別物。"),
         ]
         wlo, whi = _wilson_interval(wins, runs)
-        summary_lines.append(f"  勝率 95%CI（Wilson）: {wlo:.1%}〜{whi:.1%}")
+        summary_lines.append(_t(loc, "compare", "win_ci", "  勝率 95%CI（Wilson）: {lo:.1%}〜{hi:.1%}",
+                                lo=wlo, hi=whi))
         dlo, dhi = _mean_confidence_interval(diffs)
-        summary_lines.append(f"  差の 95%CI（t, 両側）: {dlo:+.3f}〜{dhi:+.3f}")
+        summary_lines.append(_t(loc, "compare", "diff_ci", "  差の 95%CI（t, 両側）: {lo:+.3f}〜{hi:+.3f}",
+                                lo=dlo, hi=dhi))
         d = _cohens_d(baseline_scores, elevated_scores)
-        summary_lines.append(f"  効果量（Cohen's d）: {d:+.2f}")
+        summary_lines.append(_t(loc, "compare", "cohens_d", "  効果量（Cohen's d）: {d:+.2f}", d=d))
         if preservation_rates:
             pmean = sum(preservation_rates) / len(preservation_rates)
             summary_lines.append(
-                f"具体性保存率（発散→昇華）: mean={pmean:.1%}（n={len(preservation_rates)}）"
+                _t(loc, "compare", "preservation_rate",
+                   "具体性保存率（発散→昇華）: mean={mean:.1%}（n={n}）",
+                   mean=pmean, n=len(preservation_rates))
             )
         for line in summary_lines:
             print(line)
         if args.out is not None:
             _save_measurement(
                 args.out, baseline_label, baseline_scores, elevated_scores, wins, runs,
-                preservation_rates=preservation_rates,
+                preservation_rates=preservation_rates, lang=lang,
             )
 
 
-def _save_baseline_score_record(path: Path, label: str, overall: float, evaluator) -> None:
+def _save_baseline_score_record(path: Path, label: str, overall: float, evaluator, *, lang: str | None = None) -> None:
     """best-of-n ベースラインの選択時スコア記録（再評価はしない）。"""
+    loc = _loc(lang)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         f"## {label}\n"
         f"- overall: {overall:.3f}（{evaluator.score_judgment(overall)}）\n"
-        "- スコア: 最良草案の選択時評価をそのまま使用（選択を再評価で上書きしない）\n"
+        f"- {_t(loc, 'evaluation', 'record_best_of_n_note', '- スコア: 最良草案の選択時評価をそのまま使用（選択を再評価で上書きしない）')}\n"
     )
-    print(f"→ 保存: {path}")
+    print(_t(loc, "console", "saved", "→ 保存: {path}", path=path))
 
 
 # ---- 反復改善（improve: 昇華版を改修草案で磨くループ） ----
 
-def _revision_task(task: str, elevated_prev: str) -> str:
+def _revision_task(task: str, elevated_prev: str, lang: str | None = None) -> str:
     """前回の昇華版を改修する草案のタスクを組み立てる。
 
     「昇華版 → 改修の草案(複数) → 昇華」ループの「改修草案」段階。
     各エージェントは前回の昇華版を土台に、自分の観点から可能な限り逸脱して改修草案を書く。
     昇華版の良い部分（特に他観点にはない独自の核）は残し、弱点を補強し、
     前回より高い版を目指す。草案は昇華段階で他の改修草案と衝突させる前提なので独立に書く。
+    見出し・指示文は prompts/{lang}.json の BLOCKS / MARKERS から言語別に取る。
     """
-    return (
-        f"{task}\n\n"
-        f"【改修対象: 前回の昇華版】\n{elevated_prev}\n\n"
+    resolved = i18n.resolve_lang(lang)
+    prompts = i18n.load_prompts(resolved)
+    blocks = prompts.get("BLOCKS", {})
+    marker = prompts["engine"]["MARKERS"]
+    target_label = blocks.get("revision_target", f"【{marker['revision_target_header']}】")
+    body = blocks.get(
+        "revision_task_body",
         "あなたはこの昇華版を土台に、自分の観点から可能な限り逸脱して改修した草案を書く。\n"
         "既にある良い部分（特に、他の観点にはない独自の核）は残し、\n"
         "弱点や欠けている視点を補強し、前回より高い版を目指すこと。\n"
-        "草案は昇華段階で他の改修草案と衝突させる前提なので、独立して書くこと。"
+        "草案は昇華段階で他の改修草案と衝突させる前提なので、独立して書くこと。",
+    )
+    return (
+        f"{task}\n\n"
+        f"{target_label}\n{elevated_prev}\n\n"
+        f"{body}"
     )
 
 
@@ -967,7 +1077,7 @@ def cmd_improve(args: argparse.Namespace) -> None:
             draft_task = task
         else:
             # 2回目以降: 昇華版 → 改修の草案(複数)。前回の昇華版を土台に改修草案を書かせる
-            draft_task = _revision_task(task, elevated_prev)
+            draft_task = _revision_task(task, elevated_prev, lang=getattr(args, "lang", None))
 
         drafts = engine.diverge(
             draft_task, agents=args.agents, fmt=fmt, knowledge=knowledge,
@@ -983,7 +1093,9 @@ def cmd_improve(args: argparse.Namespace) -> None:
         if reconciliation:
             _save(round_args, "reconciliation", reconciliation)
 
-        print(f"[round {r}/{rounds}] 昇華版 {len(elevated)} 字")
+        loc = _loc(getattr(args, "lang", None))
+        print(_t(loc, "console", "round_progress", "[round {r}/{rounds}] 昇華版 {len} 字",
+                 r=r, rounds=rounds, len=len(elevated)))
         _save(round_args, "elevated", elevated)
 
         entry = {"round": r, "length": len(elevated)}
@@ -992,69 +1104,79 @@ def cmd_improve(args: argparse.Namespace) -> None:
             result = _evaluate_and_report(
                 f"round {r} 昇華版", elevated, task, evaluator,
                 save_to=round_args.out / "evaluations/evaluation.md" if round_args.out else None,
+                lang=getattr(args, "lang", None),
             )
             entry["overall"] = result.overall
             # 既に高品位なら、次の改修ラウンドを生成せず停止する。
             # 高品位な成果物ほど改修で壊れやすい（実測: story-plot 0.860→0.520）。
             if entry["overall"] >= args.quality_ceiling:
-                stop_note = (
-                    f"round {r} の overall {entry['overall']:.3f} ≥ 高品位しきい値 "
-                    f"{args.quality_ceiling} → 既に高品位のため改修連鎖を停止（過修正を避ける）"
+                stop_note = _t(
+                    loc, "console", "quality_ceiling_stop",
+                    "→ round {r} の overall {overall:.3f} ≥ 高品位しきい値 {ceiling} → 既に高品位のため改修連鎖を停止（過修正を避ける）",
+                    r=r, overall=entry["overall"], ceiling=args.quality_ceiling,
                 )
-                print(f"→ {stop_note}")
+                print(stop_note)
                 break
         progress.append(entry)
 
         if args.evaluate and len(progress) >= 2:
             gain = entry["overall"] - progress[-2]["overall"]
             if gain < args.min_improve:
-                stop_note = (
-                    f"round {r} の改善 {gain:+.3f} < しきい値 {args.min_improve}"
-                    " → 頭打ちと判断し停止（過修正を避ける）"
+                stop_note = _t(
+                    loc, "console", "plateau_stop",
+                    "→ round {r} の改善 {gain:+.3f} < しきい値 {min_improve} → 頭打ちと判断し停止（過修正を避ける）",
+                    r=r, gain=gain, min_improve=args.min_improve,
                 )
-                print(f"→ {stop_note}")
+                print(stop_note)
                 break
         elevated_prev = elevated
 
-    _save_progress(args.out, task, progress, evaluate=args.evaluate, note=stop_note)
+    _save_progress(args.out, task, progress, evaluate=args.evaluate, note=stop_note,
+                   lang=getattr(args, "lang", None))
 
 
-def _save_progress(out: Path | None, task: str, progress: list[dict], *, evaluate: bool, note: str | None = None) -> None:
+def _save_progress(out: Path | None, task: str, progress: list[dict], *, evaluate: bool,
+                   note: str | None = None, lang: str | None = None) -> None:
     """各ラウンドの昇華版の長さ・評価（progress.md）を保存する。
 
     note が指定されると、早期停止（高品位 or 頭打ち）の理由を末尾に記録する。
     """
     if out is None:
         return
+    loc = _loc(lang)
     out.mkdir(parents=True, exist_ok=True)
     lines = [
-        "# 反復改善の記録（improve）",
+        _t(loc, "improve", "progress_title", "# 反復改善の記録（improve）"),
         "",
-        f"タスク: {task}",
+        _t(loc, "improve", "task_line", "タスク: {task}", task=task),
         "",
     ]
     if evaluate:
-        lines.append("| round | 昇華版の長さ | overall | 前回からの改善 |")
-        lines.append("|---|---|---|---|")
+        lines.append(_t(loc, "improve", "table_header_eval", "| round | 昇華版の長さ | overall | 前回からの改善 |"))
+        lines.append(_t(loc, "improve", "table_sep", "|---|---|---|---|"))
         for i, e in enumerate(progress):
             gain = "" if i == 0 else f"{e['overall'] - progress[i - 1]['overall']:+.3f}"
-            lines.append(f"| {e['round']} | {e['length']} | {e['overall']:.3f} | {gain} |")
+            lines.append(_t(loc, "improve", "row_eval", "| {r} | {length} | {overall:.3f} | {gain} |",
+                            r=e["round"], length=e["length"], overall=e["overall"], gain=gain))
     else:
-        lines.append("| round | 昇華版の長さ |")
-        lines.append("|---|---|")
+        lines.append(_t(loc, "improve", "table_header_simple", "| round | 昇華版の長さ |"))
+        lines.append(_t(loc, "improve", "table_sep_simple", "|---|---|"))
         for e in progress:
-            lines.append(f"| {e['round']} | {e['length']} |")
+            lines.append(_t(loc, "improve", "row_simple", "| {r} | {length} |",
+                            r=e["round"], length=e["length"]))
     lines += [
         "",
-        "各ラウンドの成果物は `round_NN/` に保存（draft_* / reconciliation / elevated）。",
-        "round 2 以降は「前回の昇華版 → 改修の草案 → 昇華」のループで、",
-        "改修草案を昇華して次の昇華版を作る（昇華版の成果が相続される）。",
+        _t(loc, "improve", "note_rounds",
+           "各ラウンドの成果物は `round_NN/` に保存（draft_* / reconciliation / elevated）。"),
+        _t(loc, "improve", "note_loop",
+           "round 2 以降は「前回の昇華版 → 改修の草案 → 昇華」のループで、"
+           "改修草案を昇華して次の昇華版を作る（昇華版の成果が相続される）。"),
     ]
     if note:
-        lines += ["", f"**停止理由**: {note}"]
+        lines += ["", _t(loc, "improve", "stop_reason", "**停止理由**: {note}", note=note)]
     path = out / "progress.md"
     path.write_text("\n".join(lines) + "\n")
-    print(f"→ 保存: {path}")
+    print(_t(loc, "console", "saved", "→ 保存: {path}", path=path))
 
 
 def _save_measurement(
@@ -1062,42 +1184,45 @@ def _save_measurement(
     elevated_scores: list[float], wins: int, runs: int,
     *,
     preservation_rates: list[float] | None = None,
+    lang: str | None = None,
 ) -> None:
     """比較の統計集計（measurement.md）を --out 直下に保存する。"""
+    loc = _loc(lang)
     out.mkdir(parents=True, exist_ok=True)
     diffs = [e - b for b, e in zip(baseline_scores, elevated_scores)]
     wlo, whi = _wilson_interval(wins, runs)
     dlo, dhi = _mean_confidence_interval(diffs)
     d = _cohens_d(baseline_scores, elevated_scores)
     cumulative_note = (
-        "\n- 注: run_02+ は累積モード（前回の昇華版を改修した草案→昇華の改善連鎖）で測定。\n"
-        "  ベースラインは毎回オリジナルタスクからの単発生成。独立run前提の統計とは別物。\n"
+        "\n" + _t(loc, "compare", "measurement_cumulative_note",
+                  "- 注: run_02+ は累積モード（前回の昇華版を改修した草案→昇華の改善連鎖）で測定。")
+        + "\n" + _t(loc, "compare", "measurement_cumulative_note2",
+                    "  ベースラインは毎回オリジナルタスクからの単発生成。独立run前提の統計とは別物。")
+        + "\n"
     ) if runs > 1 else ""
     text = (
-        f"# 比較計測（--runs {runs}）\n\n"
+        _t(loc, "compare", "measurement_title", "# 比較計測（--runs {runs}）", runs=runs) + "\n\n"
         f"- {baseline_label}: {_stat_summary(baseline_scores)}\n"
         f"- ELEVATE:            {_stat_summary(elevated_scores)}\n"
-        f"- 差（ELEVATE−ベースライン）: {_stat_summary(diffs)}\n"
-        f"- 勝率（ELEVATE > ベースライン）: {wins}/{runs} = {wins / runs:.1%}\n"
-        f"  - 勝率 95%CI（Wilson）: {wlo:.1%}〜{whi:.1%}\n"
-        f"  - 差の 95%CI（t, 両側）: {dlo:+.3f}〜{dhi:+.3f}\n"
-        f"  - 効果量（Cohen's d）: {d:+.2f}\n"
+        f"- {_t(loc, 'compare', 'diff_stat', '差（ELEVATE−ベースライン）: {stat}', stat=_stat_summary(diffs))}\n"
+        f"- {_t(loc, 'compare', 'win_rate', '勝率（ELEVATE > ベースライン）: {wins}/{runs} = {rate:.1%}', wins=wins, runs=runs, rate=wins / runs)}\n"
+        f"{_t(loc, 'compare', 'measurement_wilson', '  - 勝率 95%CI（Wilson）: {lo:.1%}〜{hi:.1%}', lo=wlo, hi=whi)}\n"
+        f"{_t(loc, 'compare', 'measurement_diff_ci', '  - 差の 95%CI（t, 両側）: {lo:+.3f}〜{hi:+.3f}', lo=dlo, hi=dhi)}\n"
+        f"{_t(loc, 'compare', 'measurement_cohens_d', '  - 効果量（Cohen\'s d）: {d:+.2f}', d=d)}\n"
         f"{cumulative_note}"
     )
     if preservation_rates:
         pmean = sum(preservation_rates) / len(preservation_rates)
         text += (
-            f"- 具体性保存率（発散→昇華）: mean={pmean:.1%}"
-            f"（n={len(preservation_rates)}）\n"
+            f"- {_t(loc, 'compare', 'preservation_rate', '具体性保存率（発散→昇華）: mean={mean:.1%}（n={n}）', mean=pmean, n=len(preservation_rates))}\n"
         )
-    text += "- 各 run の成果物・評価記録は `run_NN/` に保存。\n"
-    text += (
-        "\n> 知恵の評議会の指摘（discovery_target）: 昇華優位性は n≥10 の実測で"
-        "立証せよ。勝率が 50% を下回るタスクの開示こそが誠実な主張になる。\n"
-    )
+    text += _t(loc, "compare", "measurement_run_note", "- 各 run の成果物・評価記録は `run_NN/` に保存。") + "\n"
+    text += _t(loc, "compare", "measurement_discovery",
+               "\n> 知恵の評議会の指摘（discovery_target）: 昇華優位性は n≥10 の実測で"
+               "立証せよ。勝率が 50% を下回るタスクの開示こそが誠実な主張になる。") + "\n"
     path = out / "measurement.md"
     path.write_text(text)
-    print(f"→ 保存: {path}")
+    print(_t(loc, "console", "saved", "→ 保存: {path}", path=path))
 
 
 # ---- 温度近似の誤差定量（calibrate） ----
@@ -1151,26 +1276,31 @@ def cmd_calibrate(args: argparse.Namespace) -> None:
                 temperature=0.7,
             )))
         engine_results[engine] = engine_result
-        print(f"[{engine}] 完了（n={runs}）")
+        loc = _loc(getattr(args, "lang", None))
+        print(_t(loc, "console", "engine_done", "[{engine}] 完了（n={runs}）",
+                 engine=engine, runs=runs))
 
-    _save_calibration(args.out, args.task, engines, engine_results)
+    _save_calibration(args.out, args.task, engines, engine_results, lang=getattr(args, "lang", None))
 
 
 def _save_calibration(
     out: Path | None, task: str, engines: list[str],
     results: dict[str, list[dict]],
+    *,
+    lang: str | None = None,
 ) -> None:
     """キャリブレーション結果（calibration.md）を --out 直下に保存する。"""
+    loc = _loc(lang)
     out_dir = out or Path("outputs") / _task_dirname(task)
     out_dir.mkdir(parents=True, exist_ok=True)
     lines = [
-        f"# 温度近似の誤差定量（calibrate）",
+        _t(loc, "calibrate", "title", "# 温度近似の誤差定量（calibrate）"),
         "",
-        f"タスク: {task}",
-        f"生成エンジン: {', '.join(engines)}",
+        _t(loc, "calibrate", "task_line", "タスク: {task}", task=task),
+        _t(loc, "calibrate", "engines_line", "生成エンジン: {engines}", engines=", ".join(engines)),
         "",
-        "| エンジン | n | 長さ mean | 長さ sd | type-token比 mean | 見出し数 mean |",
-        "|---------|---|----------|---------|-------------------|---------------|",
+        _t(loc, "calibrate", "table_header", "| エンジン | n | 長さ mean | 長さ sd | type-token比 mean | 見出し数 mean |"),
+        _t(loc, "calibrate", "table_sep", "|---------|---|----------|---------|-------------------|---------------|"),
     ]
     for engine in engines:
         rs = results[engine]
@@ -1184,12 +1314,13 @@ def _save_calibration(
         )
     lines += [
         "",
-        "> 温度は claude-code エンジンではシステムプロンプトの指示文で近似される"
-        "（数値としての再現性はない）。上の分散が近似の誤差の実測である。",
+        _t(loc, "calibrate", "note",
+           "> 温度は claude-code エンジンではシステムプロンプトの指示文で近似される"
+           "（数値としての再現性はない）。上の分散が近似の誤差の実測である。"),
     ]
     path = out_dir / "calibration.md"
     path.write_text("\n".join(lines) + "\n")
-    print(f"→ 保存: {path}")
+    print(_t(loc, "console", "saved", "→ 保存: {path}", path=path))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1198,7 +1329,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         args.func(args)
     except RuntimeError as e:
-        print(f"エラー: {e}", file=sys.stderr)
+        loc = _loc(getattr(args, "lang", None))
+        print(_t(loc, "console", "error", "エラー: {msg}", msg=e), file=sys.stderr)
         return 1
     return 0
 

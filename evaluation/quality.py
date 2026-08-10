@@ -25,9 +25,16 @@ import json
 import re
 from dataclasses import dataclass
 
+from elevate import i18n
+
 # 品質評価ルーブリック（評価者プロンプトに埋め込む）
 # 全観点「高いほど良い」で統一し、評価者にもそのまま測らせる（公開される新奇度と
 # 内部の測り方が同じ。反転する二段構えは使わない）。
+# 下記の日本語定数（_QUALITY_RUBRIC / BASE_USER / FEEDBACK の既定）は**安全弁
+# （フォールバック）**——正本は prompts/{lang}.json の quality 節。QualityEvaluator は
+# 常に言語別ストアを読むため、通常は使われない。ストア欠損時に ja へ退行しない安全網。
+# 注: 品質スコアJSONキーは D2 により英語（novelty/originality/surprise/rationale）に一本化
+# 済み。この定数の最終行に残る日本語キーは旧形式の既定（ja 後方互換）。
 _QUALITY_RUBRIC = """あなたは成果物の「定番さ・独自性」の検証者です。提示された成果物を、所定の観点で評価してください。
 
 【観点】（各 0.0〜1.0）
@@ -53,8 +60,12 @@ def _clamp(x: float) -> float:
 
 
 def _extract_json(text: str) -> dict:
-    """最終行の品質評価JSON（日本語キー）を抽出する。"""
-    m = re.findall(r'\{[^{}]*"(?:新奇度|独自性|意外性)"[^{}]*\}', text)
+    """最終行の品質評価JSON（英語キー: novelty/originality/surprise/rationale、D2確定）を抽出する。
+
+    5軸評価（evaluator.py）が英語キーであることとの一貫性のため、品質評価も英語キーに
+    一本化する（計画 D2）。日本語キーのみの評価者応答は旧形式として許容しない。
+    """
+    m = re.findall(r'\{[^{}]*"(?:novelty|originality|surprise)"[^{}]*\}', text)
     if not m:
         return {}
     return json.loads(m[-1])
@@ -90,36 +101,44 @@ class QualityEvaluator:
     5軸評価（EvaluationEngine）と同じクライアントを使い、temperature 0 で決定的に評価する。
     """
 
-    def __init__(self, client):
+    def __init__(self, client, lang: str | None = None):
         self.client = client
+        self.lang = i18n.resolve_lang(lang)
+        self.prompts: dict = i18n.load_prompts(self.lang)
 
     def evaluate(self, artifact: str, task: str = "") -> QualityResult:
         """成果物の定番さ・独自性を評価する。
 
         スコアJSONの抽出に失敗した場合、形式エラーのフィードバックを付けて
         再生成する（最大3回。崩れたら再生成——5軸評価と同じ方針）。
+        プロンプト・JSONキーは prompts/{lang}.json の quality 節（英語キー、D2）。
         """
-        base_user = f"【タスク】\n{task}\n\n【成果物】\n{artifact}"
+        q = self.prompts.get("quality", {})
+        rubric = q.get("RUBRIC", _QUALITY_RUBRIC)
+        base_user = q.get("BASE_USER", "【タスク】\n{task}\n\n【成果物】\n{artifact}").format(
+            task=task, artifact=artifact
+        )
+        example = '{"novelty": 0.5, "originality": 0.5, "surprise": 0.5, "rationale": "…"}'
+        feedback_tmpl = q.get(
+            "FEEDBACK",
+            "\n\n前回の応答から品質評価のJSONを抽出できませんでした（{error}）。"
+            "説明文はそのままでも構いませんが、必ず最終行に {example} 形式のJSONを出力してください。",
+        )
         last_err = ""
         for attempt in range(MAX_QUALITY_RETRIES):
             feedback = ""
             if attempt > 0:
-                feedback = (
-                    "\n\n前回の応答から品質評価のJSONを抽出できませんでした（"
-                    f"{last_err}）。説明文はそのままでも構いませんが、"
-                    '必ず最終行に {"新奇度": 0.5, "独自性": 0.5, "意外性": 0.5, "理由": "…"} '
-                    "形式のJSONを出力してください。"
-                )
-            text = self.client.evaluate(_QUALITY_RUBRIC, base_user + feedback)
+                feedback = feedback_tmpl.format(error=last_err, example=example)
+            text = self.client.evaluate(rubric, base_user + feedback)
             try:
                 data = _extract_json(text)
                 if not data:
                     raise ValueError("JSONを抽出できませんでした")
                 return QualityResult(
-                    novelty=_clamp(float(data.get("新奇度", 0.5))),
-                    originality=_clamp(float(data.get("独自性", 0.5))),
-                    surprise=_clamp(float(data.get("意外性", 0.5))),
-                    rationale=str(data.get("理由", "")).strip(),
+                    novelty=_clamp(float(data.get("novelty", 0.5))),
+                    originality=_clamp(float(data.get("originality", 0.5))),
+                    surprise=_clamp(float(data.get("surprise", 0.5))),
+                    rationale=str(data.get("rationale", "")).strip(),
                 )
             except (ValueError, KeyError, TypeError) as exc:
                 last_err = str(exc)
@@ -128,10 +147,23 @@ class QualityEvaluator:
         )
 
 
-def format_quality_line(result: QualityResult) -> str:
-    """品質評価を1行で整形する（CLI 表示用）。全観点高いほど良い。"""
-    flags = " ⚠定番" if result.is_generic else ""
-    return (
-        f"品質評価: 新奇度={result.novelty:.2f} / 独自性={result.originality:.2f} / "
-        f"意外性={result.surprise:.2f}{flags}"
+def format_quality_line(result: QualityResult, lang: str | None = None) -> str:
+    """品質評価を1行で整形する（CLI 表示用）。全観点高いほど良い。
+
+    locales/{lang}.json の evaluation 節から言語別ラベル・定番フラグを取る
+    （quality_line / generic_flag は evaluation 節配下に置く）。
+    """
+    resolved = i18n.resolve_lang(lang)
+    locale = i18n.load_locale(resolved)
+    ev = locale.get("evaluation", {})
+    label = ev.get(
+        "quality_line",
+        "品質評価: 新奇度={novelty} / 独自性={originality} / 意外性={surprise}",
     )
+    flag = ev.get("generic_flag", "⚠定番")
+    flags = f" {flag}" if result.is_generic else ""
+    return label.format(
+        novelty=f"{result.novelty:.2f}",
+        originality=f"{result.originality:.2f}",
+        surprise=f"{result.surprise:.2f}",
+    ) + flags

@@ -6,10 +6,12 @@
 compare は run ごとに raw.md（素AI生成）と elevated.md（昇華版）を保存する
 （--runs>1 なら run_NN/ サブフォルダ）。このスクリプトはそれらを1つの
 comparison.md に束ね、スコア表つきで「どちらが読んでいて優れているか」を
-人間が判断できる形にする。
+人間が判断できる形にする。見出し・ラベルは locales/{lang}.json の render 節から
+言語別に取る（--lang で選択、既定は i18n 解決＝en）。
 
 使い方:
     python render_comparison.py examples/<sample_dir>            # 比較ドキュメントを生成
+    python render_comparison.py examples/<sample_dir> --lang ja  # 日本語で生成
     python render_comparison.py examples/<sample_dir> --html     # HTML版も生成（横並び表示）
 """
 
@@ -19,6 +21,22 @@ import argparse
 import re
 import sys
 from pathlib import Path
+
+from elevate import i18n
+
+
+def _loc(lang: str | None) -> dict:
+    """ロケール辞書を取得する（lang 未指定は i18n 解決＝既定 en）。"""
+    return i18n.load_locale(i18n.resolve_lang(lang))
+
+
+def _t(loc: dict, section: str, name: str, default: str, **fmt) -> str:
+    """ロケール辞書の section.name を取得し {fmt} を適用する（無ければ default に退避）。
+
+    name という引数名にしているのは、テンプレートの書式キー（{key} 等）と衝突しないため。
+    """
+    tmpl = loc.get(section, {}).get(name, default)
+    return tmpl.format(**fmt) if fmt else tmpl
 
 
 def _read(path: Path) -> str:
@@ -44,16 +62,17 @@ def _find_runs(out_dir: Path) -> list[Path]:
 
 
 def _score_table(measurement: str) -> str:
-    """measurement.md のスコア表ブロックを抽出して返す（無ければ空文字）。"""
-    m = re.search(r"## 結果\n(.*?)(?:\n## |\n$)", measurement, re.S)
-    if not m:
-        # 新形式（--runs>1 の比較集計）: 集計行を取り出す
-        lines = [ln for ln in measurement.splitlines() if "95%CI" in ln or "効果量" in ln or "保存率" in ln]
-        return "\n".join(lines)
-    return m.group(1).strip()
+    """measurement.md の統計行ブロックを抽出して返す（無ければ空文字）。
+
+    言語別の文言に依存せず、数値マーカー（95%CI / Cohen's d / mean=）で判定する。
+    CI ラベル（Wilson / Cohen's d）は全言語で英語のまま維持しているため、ここは
+    言語非依存で安全に抽出できる。
+    """
+    lines = [ln for ln in measurement.splitlines() if re.search(r"95%CI|Cohen's d|mean=", ln)]
+    return "\n".join(lines)
 
 
-def _run_block(run_dir: Path, idx: int) -> list[str]:
+def _run_block(run_dir: Path, idx: int, loc: dict) -> list[str]:
     """1 run 分の比較ブロック（素AI生成と昇華版を並べて読める形）を組み立てる。"""
     raw = _read_first(run_dir / "artifacts/raw.md", run_dir / "raw.md").strip()
     elevated = _read_first(run_dir / "artifacts/elevated.md", run_dir / "elevated.md").strip()
@@ -64,76 +83,83 @@ def _run_block(run_dir: Path, idx: int) -> list[str]:
         run_dir / "evaluations/evaluation_elevated.md", run_dir / "evaluation_elevated.md"
     ).strip()
 
+    raw_heading = _t(loc, "render", "raw_heading", "### 素AI生成（raw.md）")
+    elevated_heading = _t(loc, "render", "elevated_heading", "### 昇華版（elevated.md）")
+    expand = _t(loc, "render", "click_to_expand", "読む（クリックで展開）")
+
     lines: list[str] = []
     if not raw and not elevated:
         return lines
-    lines.append(f"## run {idx}")
+    lines.append(_t(loc, "render", "run_heading", "## run {idx}", idx=idx))
     lines.append("")
     if baseline_eval:
-        lines.append(f"**素AI生成の評価**\n\n```\n{baseline_eval}\n```")
+        lines.append(f"{_t(loc, 'render', 'raw_eval', '**素AI生成の評価**')}\n\n```\n{baseline_eval}\n```")
     if elevated_eval:
-        lines.append(f"**昇華版の評価**\n\n```\n{elevated_eval}\n```")
+        lines.append(f"{_t(loc, 'render', 'elevated_eval', '**昇華版の評価**')}\n\n```\n{elevated_eval}\n```")
     if raw and elevated:
         lines.append(
-            "### 素AI生成（raw.md）\n\n<details><summary>読む（クリックで展開）</summary>\n\n```markdown\n"
+            f"{raw_heading}\n\n<details><summary>{expand}</summary>\n\n```markdown\n"
             + raw
             + "\n```\n\n</details>"
         )
         lines.append(
-            "### 昇華版（elevated.md）\n\n<details><summary>読む（クリックで展開）</summary>\n\n```markdown\n"
+            f"{elevated_heading}\n\n<details><summary>{expand}</summary>\n\n```markdown\n"
             + elevated
             + "\n```\n\n</details>"
         )
     elif raw:
-        lines.append(f"### 素AI生成（raw.md）\n\n```markdown\n{raw}\n```")
+        lines.append(f"{raw_heading}\n\n```markdown\n{raw}\n```")
     elif elevated:
-        lines.append(f"### 昇華版（elevated.md）\n\n```markdown\n{elevated}\n```")
+        lines.append(f"{elevated_heading}\n\n```markdown\n{elevated}\n```")
     lines.append("")
     return lines
 
 
-def render(out_dir: Path, task: str | None = None) -> str:
+def render(out_dir: Path, task: str | None = None, lang: str | None = None) -> str:
     """out_dir の compare 出力から comparison.md の本文を生成する。"""
+    loc = _loc(lang)
     out_dir = out_dir.resolve()
     input_md = _read(out_dir / "input.md")
     if not task:
-        m = re.search(r"# タスク\n\n(.+)", input_md)
+        m = re.search(r"# (?:タスク|任务|Task)\n\n(.+)", input_md)
         task = m.group(1).strip() if m else out_dir.name
 
     measurement = _read(out_dir / "measurement.md")
     score_block = _score_table(measurement) if measurement else ""
 
     lines = [
-        "# 比較: 素AI生成 vs 昇華版",
+        _t(loc, "render", "title", "# 比較: 素AI生成 vs 昇華版"),
         "",
-        f"**タスク**: {task}",
-        f"**保存先**: `{out_dir}`",
+        _t(loc, "render", "task", "**タスク**: {task}", task=task),
+        _t(loc, "render", "saved_at", "**保存先**: `{dir}`", dir=out_dir),
         "",
-        "> このドキュメントは「統合優位性の実証」の材料である。**結論は数値が下すのではなく、",
-        "> あなたが両方を読んで判断する。** 数値は客観視のための補助であり、単発生成（約1回）と",
-        "> 統合（8草案×温度0.7→推理→最終化、約10回）はコストが桁違いに異なる点に注意せよ。",
+        _t(loc, "render", "disclaimer",
+           "> このドキュメントは「統合優位性の実証」の材料である。**結論は数値が下すのではなく、"
+           "> あなたが両方を読んで判断する。** 数値は客観視のための補助であり、単発生成（約1回）と"
+           "> 統合（8草案×温度0.7→推理→最終化、約10回）はコストが桁違いに異なる点に注意せよ。"),
     ]
     if measurement:
         lines += [
             "",
-            "## 計測サマリ",
+            _t(loc, "render", "measurement_summary", "## 計測サマリ"),
             "",
             f"```\n{measurement.strip()}\n```",
         ]
     if score_block:
-        lines += ["", "### スコア", "", score_block, ""]
+        lines += ["", _t(loc, "render", "score", "### スコア"), "", score_block, ""]
 
     for idx, run_dir in enumerate(_find_runs(out_dir), start=1):
-        lines += _run_block(run_dir, idx)
+        lines += _run_block(run_dir, idx, loc)
 
     return "\n".join(lines)
 
 
-def _html_of(md: str) -> str:
+def _html_of(md: str, raw_marker: str, elev_marker: str, html_raw: str, html_elevated: str) -> str:
     """Markdown の比較ドキュメントから横並びHTMLを生成する（ブラウザで客観視用）。
 
     完全なMarkdownパーサーは持たない。run ブロックの「素AI生成」/「昇華版」を
-    2カラムに並べる軽量変換のみを行う。
+    2カラムに並べる軽量変換のみを行う。セクション見出しのマーカー（言語別）と
+    カラムラベル（言語別）は引数で受け取る。
     """
     from html import escape
 
@@ -142,11 +168,11 @@ def _html_of(md: str) -> str:
     cur_elev: list[str] = []
     in_raw = in_elev = False
     for line in md.splitlines():
-        if line.startswith("### 素AI生成（raw.md）"):
+        if line.startswith(raw_marker):
             in_raw, in_elev = True, False
             cur_raw, cur_elev = [], []
             continue
-        if line.startswith("### 昇華版（elevated.md）"):
+        if line.startswith(elev_marker):
             in_raw, in_elev = False, True
             continue
         if line.startswith("## ") or line.startswith("# "):
@@ -168,11 +194,11 @@ def _html_of(md: str) -> str:
 <h2>run {i}</h2>
 <div style="display:flex;gap:1em;flex-wrap:wrap;">
   <div style="flex:1;min-width:320px;border:1px solid #ccc;padding:1em;">
-    <h3 style="color:#a33;">素AI生成</h3>
+    <h3 style="color:#a33;">{html_raw}</h3>
     <pre style="white-space:pre-wrap;font-family:inherit;">{escape(raw.strip())}</pre>
   </div>
   <div style="flex:1;min-width:320px;border:1px solid #ccc;padding:1em;">
-    <h3 style="color:#3a3;">昇華版</h3>
+    <h3 style="color:#3a3;">{html_elevated}</h3>
     <pre style="white-space:pre-wrap;font-family:inherit;">{escape(elev.strip())}</pre>
   </div>
 </div>"""
@@ -184,18 +210,24 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="compare 出力から比較ドキュメントを生成")
     p.add_argument("out_dir", type=Path, help="compare の出力ディレクトリ")
     p.add_argument("--task", default=None, help="タスク名（省略時は input.md から読む）")
+    p.add_argument("--lang", default=None, choices=["en", "ja", "zh"], help="出力言語（既定は i18n 解決＝en）")
     p.add_argument("--html", action="store_true", help="横並びHTML版も生成")
     args = p.parse_args(argv)
 
-    md = render(args.out_dir, task=args.task)
+    loc = _loc(args.lang)
+    md = render(args.out_dir, task=args.task, lang=args.lang)
     path = args.out_dir / "comparison.md"
     path.write_text(md)
-    print(f"→ 保存: {path}")
+    print(_t(loc, "console", "saved", "→ 保存: {path}", path=path))
 
     if args.html:
+        raw_heading = _t(loc, "render", "raw_heading", "### 素AI生成（raw.md）")
+        elev_heading = _t(loc, "render", "elevated_heading", "### 昇華版（elevated.md）")
+        html_raw = _t(loc, "render", "html_raw", "素AI生成")
+        html_elevated = _t(loc, "render", "html_elevated", "昇華版")
         html_path = args.out_dir / "comparison.html"
-        html_path.write_text(_html_of(md))
-        print(f"→ 保存: {html_path}")
+        html_path.write_text(_html_of(md, raw_heading, elev_heading, html_raw, html_elevated))
+        print(_t(loc, "console", "saved", "→ 保存: {path}", path=html_path))
     return 0
 
 

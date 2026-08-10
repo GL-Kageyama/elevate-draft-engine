@@ -1,0 +1,136 @@
+{
+  "_meta": {
+    "language": "zh",
+    "name": "中文",
+    "note": "CLI / UI / 保存模板字符串。LLM 提示词在 prompts/zh.json。"
+  },
+
+  "console": {
+    "saved": "→ 已保存：{path}",
+    "output_format_specified": "→ 输出格式（指定）：{type}（min={min}〜max={max}字）",
+    "output_format_extracted": "→ 输出格式（提取）：{type}（min={min}〜max={max}字）",
+    "output_format_desc": "  {desc}",
+    "knowledge_input": "→ 背景知识（{src}）：{n} 字",
+    "knowledge_src_direct": "直接输入",
+    "knowledge_src_file": "文件",
+    "output_format_bad": "⚠ 无法解析 --output-format（{exc}）。已禁用格式识别并继续。",
+    "sentimentality_warning": "⚠ 感伤性警告（{agent}）：检测到程式化的情感公式（末期×高龄×被遗弃 等）。请通过克制与留白来确认深度。",
+    "draft_error": "⚠ 代理人「{agent}」的草案生成失败已跳过（{exc}）。继续使用其余代理人。",
+    "artifact_title": "=== {title} ===",
+    "draft_title": "草案：{agent}",
+    "elevated_title": "升华成果物（{method}）",
+    "synthesis_title": "升华成果物（{method}）",
+    "raw_title": "素AI生成（单次调用）",
+    "evaluation_header": "[{label}] overall={overall:.3f}（{judgment}）",
+    "evaluation_score": "    {key}：{value:.2f}",
+    "evaluation_rationale": "    理由：{rationale}",
+    "baseline_single": "素AI生成（单次调用）",
+    "baseline_best_of_n": "基线（best-of-n）",
+    "round_progress": "[第 {r}/{rounds} 轮] 升华版 {len} 字",
+    "run_accumulative": "[run {r}/{runs}] 累积模式：从修订上一版升华成果物的草案出发升华（elevated {len} 字）",
+    "best_draft_verbose": "    [草案：{agent}] overall={overall:.3f}",
+    "best_draft_selected": "    → 最佳草案：{agent}（overall={overall:.3f}）",
+    "error": "错误：{msg}",
+    "quality_ceiling_stop": "→ 第 {r} 轮 overall {overall:.3f} ≥ 高品位阈值 {ceiling} → 已属高品位，停止修订链（避免过度修正）",
+    "plateau_stop": "→ 第 {r} 轮改进 {gain:+.3f} < 阈值 {min_improve} → 判断为到达平台期并停止（避免过度修正）",
+    "engine_done": "[{engine}] 完成（n={runs}）"
+  },
+
+  "templates": {
+    "input": "# 任务\n\n{task}",
+    "knowledge": "# 背景知识\n\n{knowledge}",
+    "format_title": "# 输出格式（OutputFormat）",
+    "format_deliverable_type": "- 成果物种类：{type}",
+    "format_description": "- 说明：{desc}",
+    "format_length": "- 输出长度范围：{min}〜{max} 字",
+    "format_direct_yes": "是（output_is_direct）",
+    "format_direct_no": "否（关于成果物的分析）",
+    "format_direct_line": "- 成果物本身：{value}",
+    "format_draft_header": "## 草案的形式指示（draft_guidance）",
+    "format_draft_empty": "（空 → 沿用既有的论题集中形式）",
+    "format_finalize_header": "## 最终化的形式指示（finalize_guidance）"
+  },
+
+  "evaluation": {
+    "record_header": "## {label}",
+    "record_overall": "- overall：{overall:.3f}（{judgment}）",
+    "record_scores_header": "- 分数：",
+    "record_score": "  - {key}：{value:.2f}",
+    "record_rationale": "- 理由：{rationale}",
+    "record_quality_header": "- 品质评价：",
+    "record_quality_novelty": "  - 新奇度：{value:.2f}",
+    "record_quality_originality": "  - 独创性：{value:.2f}",
+    "record_quality_surprise": "  - 意外性：{value:.2f}",
+    "record_quality_rationale": "  - 判定：{rationale}",
+    "record_best_of_n_note": "- 分数：沿用选择时的最佳草案评分（不因重新评价覆盖选择结果）",
+    "quality_line": "品质评价：新奇度={novelty} / 独创性={originality} / 意外性={surprise}",
+    "generic_flag": "⚠定番"
+  },
+
+  "compare": {
+    "summary_header": "=== 比较汇总 ===",
+    "baseline_stat": "{label}：{stat}",
+    "elevated_stat": "ELEVATE：            {stat}",
+    "diff_stat": "差值（ELEVATE−基线）：{stat}",
+    "win_rate": "胜率（ELEVATE > 基线）：{wins}/{runs} = {rate:.1%}",
+    "cumulative_note": "注：run_02+ 为累积模式（修订上一版升华成果物的草案→升华的改进链）进行测量。",
+    "cumulative_note2": "    基线每次都从原始任务单次生成。与假设独立 run 的统计不同。",
+    "win_ci": "  胜率 95%CI（Wilson）：{lo:.1%}〜{hi:.1%}",
+    "diff_ci": "  差值 95%CI（t，双侧）：{lo:+.3f}〜{hi:+.3f}",
+    "cohens_d": "  效应量（Cohen's d）：{d:+.2f}",
+    "preservation_rate": "具体性保存率（发散→升华）：mean={mean:.1%}（n={n}）",
+    "measurement_title": "# 比较测量（--runs {runs}）",
+    "measurement_wilson": "  - 胜率 95%CI（Wilson）：{lo:.1%}〜{hi:.1%}",
+    "measurement_diff_ci": "  - 差值 95%CI（t，双侧）：{lo:+.3f}〜{hi:+.3f}",
+    "measurement_cohens_d": "  - 效应量（Cohen's d）：{d:+.2f}",
+    "measurement_cumulative_note": "- 注：run_02+ 为累积模式（修订上一版升华成果物的草案→升华的改进链）进行测量。",
+    "measurement_cumulative_note2": "  基线每次都从原始任务单次生成。与假设独立 run 的统计不同。",
+    "measurement_run_note": "- 各 run 的成果物与评价记录保存在 `run_NN/`。",
+    "measurement_discovery": "\n> 知恵的评议会指摘（discovery_target）：请以 n≥10 的实测来证明升华优势。公开胜率低于 50% 的任务才是诚实的陈述。",
+    "best_of_n_requires_evaluate": "--baseline best-of-n 需要评价草案以选出最佳，因此需要 --evaluate"
+  },
+
+  "improve": {
+    "progress_title": "# 迭代改进记录（improve）",
+    "task_line": "任务：{task}",
+    "table_header_eval": "| 轮 | 升华版长度 | overall | 较上轮改进 |",
+    "table_header_simple": "| 轮 | 升华版长度 |",
+    "table_sep": "|---|---|---|---|",
+    "table_sep_simple": "|---|---|",
+    "row_eval": "| {r} | {length} | {overall:.3f} | {gain} |",
+    "row_simple": "| {r} | {length} |",
+    "note_rounds": "各轮的成果物保存在 `round_NN/`（draft_* / reconciliation / elevated）。",
+    "note_loop": "第 2 轮起为「上一版升华成果物 → 修订草案 → 升华」的循环，将修订草案升华为下一版升华成果物（成果被继承）。",
+    "stop_reason": "**停止理由**：{note}"
+  },
+
+  "calibrate": {
+    "title": "# 温度近似误差定量（calibrate）",
+    "task_line": "任务：{task}",
+    "engines_line": "生成引擎：{engines}",
+    "table_header": "| 引擎 | n | 长度 mean | 长度 sd | type-token比 mean | 标题数 mean |",
+    "table_sep": "|-------|---|----------|---------|-------------------|-------------|",
+    "note": "> claude-code 引擎通过系统提示词中的指示文来近似温度（没有数值可重现性）。上方的方差就是该近似的实测误差。"
+  },
+
+  "mock": {
+    "evaluation": "模拟评估"
+  },
+
+  "render": {
+    "title": "# 对比：素AI生成 vs 升华版",
+    "task": "**任务**：{task}",
+    "saved_at": "**保存位置**：`{dir}`",
+    "disclaimer": "> 本文档是「统合优势的实证」的材料。**结论不由数字决定——请你阅读两者后自行判断。** 数字是客观审视的辅助；注意单次生成（约1次调用）与统合（8篇草案×温度0.7→推理→最终化，约10次调用）的成本差一个数量级。",
+    "measurement_summary": "## 测量摘要",
+    "score": "### 分数",
+    "run_heading": "## run {idx}",
+    "raw_eval": "**素AI生成的评估**",
+    "elevated_eval": "**升华版的评估**",
+    "raw_heading": "### 素AI生成（raw.md）",
+    "elevated_heading": "### 升华版（elevated.md）",
+    "click_to_expand": "阅读（点击展开）",
+    "html_raw": "素AI生成",
+    "html_elevated": "升华版"
+  }
+}
