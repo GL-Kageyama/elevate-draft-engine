@@ -20,13 +20,13 @@ README / SKILL / examples/README must contain **only current information**. Curr
 ## Fixed policies (do not touch)
 
 - **5-axis rubric**: diversity / synthesis / elevation / honesty / utility (equal weights of 0.20). `evaluation/evaluator.py` and `agents/*.md` must not be changed. These five axes are policy, not scoring design goals.
-- **Three-moment dialectic**: the three moments of negate / preserve / elevate are the core of the mechanism. Aufheben temperature 0.9 and finalization temperature 0.0 are fixed.
+- **Three-moment dialectic**: the three moments of negate / preserve / elevate are the core of the mechanism. The idea level (`--idea-level`) selects how extreme a position the divergence and Aufheben reach: standard 0.9 (default, backward compatible) / very 1.2 / extreme 1.5 — each paired with an escalating divergence hint. Finalization temperature 0.0 is fixed.
 - **Thesis-focused format**: a draft consists of three elements — core thesis / grounds / premise — in 500–800 characters. DRAFT_MAX_LENGTH=1000 (relaxed to 3000 for creative tasks).
 - **i18n baseline**: multilingual support (en/ja/zh) is the default baseline for any fix or change. New or modified prompts, CLI messages, templates, and saved output must resolve through the 3-layer mechanism (locale JSON / per-language prompts / mirror tree), and user-facing text must be produced in the run's language (`--lang`).
 
 ## Tests
 
-Run all tests with `pytest tests/`. 246 tests.
+Run all tests with `pytest tests/`. 259 tests.
 
 ## Things that must not be broken
 

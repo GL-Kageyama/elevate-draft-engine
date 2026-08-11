@@ -44,7 +44,7 @@ class FakeClient:
         self.messages = messages
 
 
-def _make_client(messages: FakeMessages) -> ClaudeClient:
+def _make_client(messages: FakeMessages, *, lang: str | None = None) -> ClaudeClient:
     cfg = ClaudeConfig(
         api_key="sk-test",
         base_url="https://test.local",
@@ -52,7 +52,7 @@ def _make_client(messages: FakeMessages) -> ClaudeClient:
         evaluation_model="claude-haiku-4-5",
         max_retries=3,
     )
-    client = ClaudeClient(cfg)
+    client = ClaudeClient(cfg, lang=lang)
     client.client = FakeClient(messages)
     return client
 
@@ -283,3 +283,64 @@ def test_claude_code_stream_nonzero_exit_without_text_raises(monkeypatch):
 
     with pytest.raises(RuntimeError, match="claude -p が空応答/異常終了"):
         client.generate(system="s", user="u")
+
+
+# ---- 発想レベル（idea_level）のヒント注入 ----
+
+class _RecorderMessages:
+    def __init__(self):
+        self.captured: dict = {}
+
+    def create(self, **kwargs):
+        self.captured.update(kwargs)
+        return FakeResponse(["成果物"])
+
+
+def test_claude_client_injects_idea_level_hint():
+    """sdk アダプタは idea_level のヒントを user に前置し、温度も API に渡す。
+
+    発想レベルは「より極端」の意味論をプロンプトで担保する主レバー（reasoning モデルでは
+    温度だけでは確実な強化にならないため）。very=1.2 のときその強化ヒントが入る。
+    """
+    rec = _RecorderMessages()
+    client = _make_client(FakeMessages([FakeResponse(["成果物"])]), lang="ja")
+    client.client = FakeClient(rec)
+    client.generate(system="s", user="タスク", temperature=1.2, idea_level="very")
+
+    user = rec.captured["messages"][0]["content"]
+    assert "[非常に極端な発散を重視]" in user
+    assert "前提そのもの" in user
+    assert rec.captured["temperature"] == 1.2
+
+
+def test_claude_client_no_hint_without_idea_level():
+    """sdk アダプタは idea_level 未指定なら素のプロンプト（後方互換: 温度のみ）。"""
+    rec = _RecorderMessages()
+    client = _make_client(FakeMessages([FakeResponse(["成果物"])]), lang="ja")
+    client.client = FakeClient(rec)
+    client.generate(system="s", user="タスク", temperature=0.9)
+
+    assert rec.captured["messages"][0]["content"] == "タスク"
+    assert rec.captured["temperature"] == 0.9
+
+
+def test_claude_code_idea_level_three_tier_hints():
+    """claude-code は idea_level に応じて ①②③ の3段ヒントに切り替わる。"""
+    client = ClaudeCodeClient(lang="ja")
+    base = "タスク本文"
+    standard = client._localized_user(base, temperature=0.9, idea_level="standard")
+    very = client._localized_user(base, temperature=1.2, idea_level="very")
+    extreme = client._localized_user(base, temperature=1.5, idea_level="extreme")
+
+    assert "[発散を重視]" in standard
+    assert "[非常に極端な発散を重視]" in very
+    assert "[極度に極端な発散を重視]" in extreme
+    assert standard != very != extreme
+
+
+def test_claude_code_temperature_fallback_backward_compat():
+    """claude-code は idea_level 未指定なら従来の温度ベース（>=0.5 発散 / <0.5 一貫性）。"""
+    client = ClaudeCodeClient(lang="ja")
+    assert "[発散を重視]" in client._localized_user("u", temperature=0.9)
+    assert "[一貫性を重視]" in client._localized_user("u", temperature=0.0)
+    assert client._localized_user("u", temperature=None) == "u"

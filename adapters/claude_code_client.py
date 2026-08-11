@@ -60,9 +60,14 @@ class ClaudeCodeClient:
         user: str,
         *,
         temperature: float | None = None,
+        idea_level: str | None = None,
         on_chunk: Callable[[str], None] | None = None,
     ) -> str:
         """生成し、応答を返す。
+
+        claude -p は温度パラメータを持たないため、idea_level（発想レベル）または温度の
+        設計意図をプロンプトのヒントで近似する。idea_level が渡されたらそのレベルの
+        発散強化ヒント（①②③）、渡されなければ従来の温度ベース（>=0.5 発散 / <0.5 一貫性）。
 
         on_chunk が与えられたら、届いた文字列を逐次コールバックする（草案のストリーム保存）。
         claude -p --output-format stream-json の assistant イベントは累積テキストを運ぶため、
@@ -70,7 +75,7 @@ class ClaudeCodeClient:
         （トークン単位ではなくバースト配送）。届いた途中までの文字列は部分文として返し、
         完全性ガード側が「打ち切り」と判定して再生成する（このときファイルは空に戻る）。
         """
-        prompt = self._localized_user(user, temperature)
+        prompt = self._localized_user(user, temperature, idea_level)
         last_err = ""
         for attempt in range(self.max_retries):
             try:
@@ -164,15 +169,24 @@ class ClaudeCodeClient:
             return f"[一貫性を重視]\n{_CONSISTENT_HINT}\n\n{user}"
         return user
 
-    def _localized_user(self, user: str, temperature: float | None) -> str:
-        """温度の設計意図を、このクライアントの言語のヒントで近似する。"""
+    def _localized_user(self, user: str, temperature: float | None, idea_level: str | None = None) -> str:
+        """温度・発想レベルの設計意図を、このクライアントの言語のヒントで近似する。
+
+        idea_level が渡されたらその発散強化ヒント（standard/very/extreme。正本は
+        i18n.adapter_hint）を優先し、渡されなければ従来の温度ベース（>=0.5 発散 /
+        <0.5 一貫性。ja 定数を安全弁に）で後方互換を保つ。
+        """
         ad = self.prompts.get("adapters", {})
-        if temperature is not None and temperature >= 0.5:
+        if idea_level is not None:
+            prefix, hint = i18n.adapter_hint(self.prompts, idea_level=idea_level)
+        elif temperature is not None and temperature >= 0.5:
             hint = ad.get("DIVERGE_HINT", _DIVERGE_HINT)
             prefix = ad.get("DIVERGE_PREFIX", "[発散を重視]")
-            return f"{prefix}\n{hint}\n\n{user}"
-        if temperature is not None and temperature < 0.5:
+        elif temperature is not None and temperature < 0.5:
             hint = ad.get("CONSISTENT_HINT", _CONSISTENT_HINT)
             prefix = ad.get("CONSISTENT_PREFIX", "[一貫性を重視]")
-            return f"{prefix}\n{hint}\n\n{user}"
-        return user
+        else:
+            return user
+        if not hint:
+            return user
+        return f"{prefix}\n{hint}\n\n{user}"

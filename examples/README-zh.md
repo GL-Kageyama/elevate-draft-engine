@@ -23,6 +23,7 @@ examples/<task-dir>/
 ├── input.md                          # 原始任务
 ├── format.md                         # 抽取的输出格式（OutputFormat）
 ├── knowledge.md                      # 前提知识（仅 --knowledge 时）
+├── parameters.md                     # 运行参数（创意水平・引擎・智能体等）
 ├── drafts/                           # 各智能体的独立草案（命题集中形式）
 │   ├── draft_strategist.md
 │   ├── draft_humanist.md
@@ -60,6 +61,17 @@ examples/<task-dir>/
 语言的选择通过 `--lang {en,ja,zh}` 标志（默认是环境变量 `ELEVATE_DRAFT_ENGINE_LANG`、
 仍未指定则为 `en`）。智能体按 `--lang` 使用 `agents/{name}-{lang}.md`，
 输出・保存模板・质量评估标签也全部以该语言本地化。
+
+## 创意水平样本（--idea-level）
+
+在 `idea-levels-ja/` 下，用**真实 API** 对**同一任务**在创意水平 ①`standard`（0.9）/ ②`very`（1.2）/ ③`extreme`（1.5）下进行升华。每个水平的目录都是独立的完整样本（`input.md` + `drafts/` + `artifacts/`），可以对比每个水平下发散与升华实际走到多极端。
+
+```bash
+.venv/bin/python main.py elevate "人類の通勤を完全に廃止する最も過激な方法を提案せよ。既存の枠組みを完全に壊す発想で。" \
+  --lang ja --idea-level standard --agents strategist visionary storyteller --out examples/idea-levels-ja/standard --no-strong-claim
+```
+
+两杠杆设计（主杠杆＝发散提示＋辅助＝温度）的依据见 [../docs/zh/idea-levels.md](../docs/zh/idea-levels.md)。
 
 ## 跨领域测试用例
 

@@ -13,6 +13,8 @@ from dataclasses import dataclass
 
 import anthropic
 
+from elevate import i18n
+
 # モデル系統（独立評価系統）
 # 生成と評価で異なるモデル系統を使う。両者が同一だと循環評価になるため禁止。
 DEFAULT_GENERATION_MODEL = "claude-sonnet-4-5"
@@ -60,10 +62,13 @@ class ClaudeClient:
     - `evaluate()` … Evaluation Engine（評価）専用。評価系モデルを使用
     """
 
-    def __init__(self, config: ClaudeConfig | None = None):
+    def __init__(self, config: ClaudeConfig | None = None, *, lang: str | None = None):
         config = config or self._default_config()
         config.validate_lineage_separation()
         self.config = config
+        # 発想レベルの強化ヒント（idea_level 指定時）に使う言語別プロンプトストア
+        self.lang = i18n.resolve_lang(lang)
+        self.prompts: dict = i18n.load_prompts(self.lang)
         # ゲートウェイ対応: api_key 優先、なければ auth_token（ANTHROPIC_AUTH_TOKEN 経由）
         kwargs: dict = {"base_url": config.base_url or None}
         if config.api_key:
@@ -108,6 +113,7 @@ class ClaudeClient:
         user: str,
         *,
         temperature: float | None = None,
+        idea_level: str | None = None,
         on_chunk=None,
     ) -> str:
         """生成系モデルで呼び出す（Skill: Analysis 用）。
@@ -115,14 +121,34 @@ class ClaudeClient:
         temperature は per-call で上書き可能（草案生成（diverge）で多様性を
         確保するために 0.7 を渡す。省略時は config の既定温度）。
 
+        idea_level が渡されたら、その発想レベル（standard/very/extreme）の発散強化
+        ヒントをユーザープロンプトに注入する（reasoning モデルでは温度だけでは
+        確実な強化にならないため。diverge・aufheben が使う）。渡されなければ
+        従来どおり素のプロンプトで温度だけを送る（後方互換）。
+
         on_chunk はストリーム追記用コールバック。SDK 経路では応答を逐次ストリーム
         しないため、全文が揃った時点で 1 回だけ呼ぶ（草案の逐次保存は実現するが、
         生成中の追記は claude-code エンジンのみが行う）。
         """
-        text = self._call(self.config.generation_model, system, user, temperature=temperature)
+        prompt = self._level_hinted(user, idea_level)
+        text = self._call(self.config.generation_model, system, prompt, temperature=temperature)
         if on_chunk is not None:
             on_chunk(text)
         return text
+
+    def _level_hinted(self, user: str, idea_level: str | None) -> str:
+        """発想レベルが指定されたら、その強化ヒントをユーザープロンプトに前置する。
+
+        idea_level のヒント/プレフィックスは i18n.adapter_hint が解決する（キーの
+        正本は i18n、文言は self.prompts = prompts/{lang}.json）。返り値の先頭に
+        プレフィックスとヒントを足すだけで、温度は別途 API に渡す。
+        """
+        if idea_level is None:
+            return user
+        prefix, hint = i18n.adapter_hint(self.prompts, idea_level=idea_level)
+        if hint is None:
+            return user
+        return f"{prefix}\n{hint}\n\n{user}"
 
     def evaluate(self, system: str, user: str) -> str:
         """評価系モデルで呼び出す（Evaluation Engine 用）。"""

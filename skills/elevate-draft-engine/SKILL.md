@@ -46,7 +46,7 @@ Japanese request → `--lang ja`, Chinese request → `--lang zh`, otherwise `en
 
 This skill is a thin interface that **only calls `main.py`**. DIVERGE → elevation
 reasoning → finalization logic, the completeness guard (truncation → regenerate),
-the Aufheben temp 0.9 / finalize temp 0.0 temperature control, and the stable
+the idea-level temperature control (standard 0.9 / very 1.2 / extreme 1.5 for diverge and Aufheben, finalize fixed at 0.0), and the stable
 `claude -p` path all live in the Python engine. **Do not launch the creator agents
 as subagents and elevate by hand** — bypassing the engine loses the guard and
 temperature control and is a downgrade. Execution is always `main.py` via Bash.
@@ -64,6 +64,7 @@ temperature control and is a downgrade. Execution is always `main.py` via Bash.
 | `lang` | `en` | execution language (`en`/`ja`/`zh`). Agent definitions, LLM prompts, CLI, and saved templates all switch to this language. Default `en`. Also settable via the `ELEVATE_DRAFT_ENGINE_LANG` env var (CLI `--lang` wins) |
 | `agents` | all 8 | creator agents to convene (`strategist` `humanist` `differentiator` etc.) |
 | `method` | `two-stage` | `two-stage` (elevate → finalize) / `single-pass` (single-pass elevation) |
+| `idea_level` | `standard` | how extreme the divergence and elevation reach: `standard` (0.9, default, backward compatible) / `very` (1.2) / `extreme` (1.5). Applied to diverge and aufheben; finalization stays at 0.0 |
 | `engine` | `claude-code` | `claude-code` (independent `claude -p` launch, stable) / `sdk` / `mock` |
 | `rounds` | `3` | `improve` only: how many times to repeat elevation. From round 2 onward the drafts revise the previous elevated |
 | `evaluate` | `false` | `improve`: quality-evaluate each round's elevated and early-stop when improvement plateaus / `compare`: enable score comparison |

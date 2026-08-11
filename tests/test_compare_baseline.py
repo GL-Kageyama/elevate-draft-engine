@@ -198,6 +198,42 @@ def test_compare_no_strong_claim_combines_with_baseline(tmp_path) -> None:
     assert "勝率" in out
 
 
+def test_compare_idea_level_cli_accepted(tmp_path) -> None:
+    """--idea-level が共通オプションとして受理され、mock でも動作する（very=1.2）。"""
+    code, out = _run_compare(
+        ["compare", "タスク", "--mock", "--evaluate", "--idea-level", "very"], cwd=tmp_path
+    )
+    assert code == 0
+    assert "[ELEVATE]" in out
+
+
+def test_idea_level_invalid_choice_rejected(tmp_path) -> None:
+    """不明な --idea-level は argparse の choices で拒否される。"""
+    import main as _main
+
+    parser = _main._build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["compare", "タスク", "--mock", "--idea-level", "ultra"])
+
+
+def test_run_parameters_saved_with_idea_level(tmp_path) -> None:
+    """--out 指定時に parameters.md が実行時パラメータとともに保存される。
+
+    発想レベル（--idea-level very → 温度 1.2）・エンジン・方法等が構造化されて
+    input.md / format.md と並列の parameters.md に残り、成果物を後から解釈・再現できる。
+    """
+    code, _ = _run_compare(
+        ["elevate", "タスク", "--mock", "--lang", "ja", "--idea-level", "very", "--out", str(tmp_path)],
+        cwd=tmp_path,
+    )
+    assert code == 0
+    params = (tmp_path / "parameters.md").read_text(encoding="utf-8")
+    assert "実行パラメータ" in params
+    assert "very（温度 1.2）" in params
+    assert "エンジン: sdk" in params
+    assert "出力形式" in params
+
+
 def test_compare_without_out_saves_to_outputs_task_dir(tmp_path) -> None:
     """--out 未指定でも outputs/{タスク名}/ にデフォルト保存される（全成果物・草案は逐次保存）。"""
     code, _ = _run_compare(

@@ -32,8 +32,8 @@
                 最终成果物
 ```
 
-- **DIVERGE**: 8 种创作者智能体 × 温度 0.9，各自生成**极限发散**的独立草案。通过角色多样性（system）＋温度多样性保证独立性。妥协与中间解不会成为素材——而是为了在之后的升华中被提升到更高维度而刻意锐化的个别解。
-- **SYNTHESIZE**（核心）: 阅读全部草案，以**否定·保存·高次化**的三契机进行扬弃的升华推理（temp 0.9）→ 只阅读扬弃推理的最终化（temp 0.0）。构成单一观点草案所不具备的超越性整合解。
+- **DIVERGE**: 8 种创作者智能体各自生成**极限发散**的独立草案。通过角色多样性（system）＋温度多样性保证独立性。通过**创意水平**（`--idea-level`）选择发散要走到多极端：standard（0.9・默认）/ very（1.2）/ extreme（1.5）。每个水平配对一个递进式发散提示。妥协与中间解不会成为素材——而是为了在之后的升华中被提升到更高维度而刻意锐化的个别解。
+- **SYNTHESIZE**（核心）: 阅读全部草案，以**否定·保存·高次化**的三契机进行扬弃的升华推理（与创意水平相同的温度）→ 只阅读扬弃推理的最终化（temp 0.0）。构成单一观点草案所不具备的超越性整合解。
   - 例如 strategist 的「收益」与 humanist 的「共感」的冲突，不是逻辑上的妥协（条件性接受），而是被扬弃为**让两者的真理同时成立的新框架**。
   - 「升华优于单次生成」是**设计目标**。通过 `compare` 的实测来验证（参见 [升华优势性的测量](#升华优势性的测量compare)）。
   - `synthesize()` 也接受**外部草案**。人类专家写的分析、其他模型的输出、过去的成果物等，无论出处如何，只要投入「多个不同视角」，就能返回超越性整合解。
@@ -146,7 +146,7 @@ Aufheber 承担。
 
 ```bash
 python -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/python -m pytest tests/ -q     # 246 个测试
+.venv/bin/python -m pytest tests/ -q     # 259 个测试
 
 # 无需 API 的 mock，一口气确认流水线
 .venv/bin/python main.py compare "健康AI产品策划" --mock --evaluate
@@ -186,13 +186,14 @@ python main.py improve "任务" --rounds 3 --evaluate             # + 给各轮�
 通用选项: `--lang {en,ja,zh}`（语言指定。默认 en）/
 `--mock`（不需要 API）/ `--engine sdk|claude-code`（默认 sdk）/
 `--method two-stage|single-pass`（默认 two-stage）/
+`--idea-level {standard,very,extreme}`（发散・升华的极端程度。默认 standard）/
 `--agents strategist humanist`（限定智能体）/ `--out DIR`（成果物的保存位置。省略时
 自动保存到 `outputs/{任务名}/`。diverge / elevate / compare / improve 全部以所有成果物为对象）/
 `--runs N`（compare 重复 N 次）/ `--baseline single|best-of-n`（比较对象）/
 `--no-strong-claim`（去除断言框架）/ `--logic-check`（逻辑一致性恢复工序。默认无效）/
 `--rounds N` / `--min-improve` / `--quality-ceiling`（improve 的迭代次数・触顶阈值・高品位停止阈值。高品位默认 0.75 有效）/
 `--output-format '<JSON>'`（显式指定输出格式。省略时在实 API 下由 LLM 从任务动态提取）/
-`--knowledge 'TEXT'` / `--knowledge-file PATH` / `--ask-knowledge`（前提知识。把素材・约束・背景信息作为生成的根基注入所有阶段。相互排斥。保存位置 `--out/knowledge.md`）
+`--knowledge 'TEXT'` / `--knowledge-file PATH` / `--ask-knowledge`（前提知识。把素材・约束・背景信息作为生成的根基注入所有阶段。相互排斥。保存位置 `--out/knowledge.md`。运行参数保存到 `--out/parameters.md`）
 
 ### 输出格式识别（按领域的形式）
 
@@ -204,6 +205,18 @@ python main.py improve "任务" --rounds 3 --evaluate             # + 给各轮�
 
 把素材・约束・背景信息作为生成的根基注入所有阶段（与 fmt=形式的约束相对的内容约束）。
 指定方法・注入范围・保存位置的详细见 [docs/knowledge.md](docs/zh/knowledge.md)。
+
+### 创意水平（--idea-level）
+
+用 `--idea-level {standard,very,extreme}` 选择 发散（diverge）与 升华推理（Aufheben）要走到多极端。通过两个杠杆适用：递进式**发散提示**（主杠杆。reasoning 模型对温度超过 1 的反映并不可靠）+ **温度**（辅助）。最终化无论水平如何都始终使用温度 0.0。
+
+| 水平 | 温度 | 含义 |
+|---|---|---|
+| `standard`（默认） | 0.9 | 一般地极端 — 既有的行为（向后兼容） |
+| `very` | 1.2 | 非常极端 |
+| `extreme` | 1.5 | 极度极端 |
+
+`sdk` 引擎把温度与提示两者都传给 API。`claude-code` 引擎（没有温度旋钮）仅通过提示来近似水平。两杠杆设计的依据与温度超过 1 的网关发现见 [docs/idea-levels.md](docs/zh/idea-levels.md)。
 
 ### 升华优势性的测量（compare）
 
@@ -282,7 +295,7 @@ elevate-draft-engine/
 │   └── quality.py              # 质量评估的 3 个观点（新奇度・独创性・意外性）
 ├── skills/
 │   └── elevate-draft-engine/SKILL.md   # 门面 skill（启动 main.py。编排委托给引擎）
-├── tests/                      # 246 个测试
+├── tests/                      # 259 个测试
 ├── examples/                   # 执行样本集（跨领域测试用例等）
 │   └── multi-domain/           # 跨领域格式识别+知识注入的验证用例
 ├── docs/                       # 深掘详解（output-format / knowledge / measurement / api）

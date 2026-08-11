@@ -32,8 +32,8 @@ AIが一発で出す「平均的な良い答え」を超えるために、**DIVE
                 最終成果物
 ```
 
-- **DIVERGE**: 8種のクリエイターエージェント × 温度 0.9 で、それぞれが**極限まで逸脱した**独立草案を生成。役割多様性（system）＋温度多様性で独立を保証。妥協や中間解は素材にならない——後の昇華で一段高い次元へ引き上げるための、あえて先鋭化した個別解を出す。
-- **SYNTHESIZE**（核心）: 全草案を読み、**否定・保存・高次化**の三契機で止揚する昇華推理（temp 0.9）→ 止揚推理だけを読む最終化（temp 0.0）。単一観点の草案にはない超越的な統合解を構成する。
+- **DIVERGE**: 8種のクリエイターエージェントが、それぞれ**極限まで逸脱した**独立草案を生成。役割多様性（system）＋温度多様性で独立を保証。**発想レベル**（`--idea-level`）で発散の行き先を選ぶ: standard（0.9・既定）/ very（1.2）/ extreme（1.5）。各レベルに段階的な発散ヒントが対になる。妥協や中間解は素材にならない——後の昇華で一段高い次元へ引き上げるための、あえて先鋭化した個別解を出す。
+- **SYNTHESIZE**（核心）: 全草案を読み、**否定・保存・高次化**の三契機で止揚する昇華推理（発想レベルと同じ温度）→ 止揚推理だけを読む最終化（temp 0.0）。単一観点の草案にはない超越的な統合解を構成する。
   - 例えば strategist の「収益」と humanist の「共感」の衝突は、論理的な妥協（条件付き受容）ではなく、両者の真理を**同時に成立させる新たな枠組み**へ止揚される。
   - 「昇華が単発生成を上回る」は**設計目標**。`compare` による実測で検証する（[昇華優位性の計測](#昇華優位性の計測compare) を参照）。
   - `synthesize()` は**外部草案も受け付ける**。人間の専門家が書いた分析、別モデルの出力、過去の成果物など、出所を問わず「複数の異なる視点」を突っ込めば超越的な統合解を返す。
@@ -147,7 +147,7 @@ Aufheber が引き受ける。
 
 ```bash
 python -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/python -m pytest tests/ -q     # 246件
+.venv/bin/python -m pytest tests/ -q     # 259件
 
 # API 不要のモックでパイプライン確認
 .venv/bin/python main.py compare "健康AIの企画" --mock --evaluate
@@ -187,13 +187,14 @@ python main.py improve "タスク" --rounds 3 --evaluate             # + 各ラ�
 共通オプション: `--lang {en,ja,zh}`（言語指定。既定 en）/
 `--mock`（API不要）/ `--engine sdk|claude-code`（既定 sdk）/
 `--method two-stage|single-pass`（既定 two-stage）/
+`--idea-level {standard,very,extreme}`（発散・昇華の極端さ。既定 standard）/
 `--agents strategist humanist`（エージェントを限定）/ `--out DIR`（成果物の保存先。省略時は
 `outputs/{タスク名}/` に自動保存。diverge / elevate / compare / improve すべて全成果物を対象）/
 `--runs N`（compare を N 回反復）/ `--baseline single|best-of-n`（比較対象）/
 `--no-strong-claim`（断言枠除去）/ `--logic-check`（論理一貫性の復元工程。既定は無効）/
 `--rounds N` / `--min-improve` / `--quality-ceiling`（improve の反復回数・頭打ちしきい値・高品位停止しきい値。高品位は既定 0.75 で有効）/
 `--output-format '<JSON>'`（出力形式の明示指定。省略時は実APIでタスクから LLM が動的に抽出）/
-`--knowledge 'TEXT'` / `--knowledge-file PATH` / `--ask-knowledge`（前提知識。素材・制約・背景情報を生成の土台として全段階に注入。相互排他。保存先 `--out/knowledge.md`）
+`--knowledge 'TEXT'` / `--knowledge-file PATH` / `--ask-knowledge`（前提知識。素材・制約・背景情報を生成の土台として全段階に注入。相互排他。保存先 `--out/knowledge.md`。実行時パラメータは `--out/parameters.md` に保存）
 
 ### 出力フォーマット認識（分野ごとの形式）
 
@@ -205,6 +206,18 @@ python main.py improve "タスク" --rounds 3 --evaluate             # + 各ラ�
 
 素材・制約・背景情報を生成の土台として全段階に注入する（fmt=形の制約と対になる内容の制約）。
 指定方法・注入範囲・保存先の詳細は [docs/knowledge.md](docs/ja/knowledge.md)。
+
+### 発想レベル（--idea-level）
+
+`--idea-level {standard,very,extreme}` で、発散（diverge）と昇華推理（Aufheben）がどこまで極端に踏み込むかを選ぶ。2つのレバーで適用する: 段階的な**発散ヒント**（主レバー。reasoning モデルは温度 1 越えを確実には反映しないため）＋**温度**（補助）。最終化はレベルに関わらず常に温度 0.0。
+
+| レベル | 温度 | 意味 |
+|---|---|---|
+| `standard`（既定） | 0.9 | 一般的に極端 — 従来の挙動（後方互換） |
+| `very` | 1.2 | 非常に極端 |
+| `extreme` | 1.5 | 極度に極端 |
+
+`sdk` エンジンは温度とヒントの両方を API に渡す。`claude-code` エンジン（温度つまみなし）はヒントのみでレベルを近似する。2レバー設計の根拠と温度 1 越えのゲートウェイ所見は [docs/idea-levels.md](docs/ja/idea-levels.md)。
 
 ### 昇華優位性の計測（compare）
 
@@ -283,7 +296,7 @@ elevate-draft-engine/
 │   └── quality.py              # 品質評価の3観点（新奇度・独自性・意外性）
 ├── skills/
 │   └── elevate-draft-engine/SKILL.md   # ファサード skill（main.py を起動。オーケストレーションは委譲）
-├── tests/                      # 246件
+├── tests/                      # 259件
 ├── examples/                   # 実行サンプル集（分野横断テストケース等）
 │   └── multi-domain/           # 分野横断フォーマット認識+知識注入の検証ケース
 ├── docs/                       # 深掘り詳細（output-format / knowledge / measurement / api）

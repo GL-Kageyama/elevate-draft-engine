@@ -23,6 +23,7 @@ examples/<task-dir>/
 ├── input.md                          # 元のタスク
 ├── format.md                         # 抽出された出力形式（OutputFormat）
 ├── knowledge.md                      # 前提知識（--knowledge 指定時のみ）
+├── parameters.md                     # 実行時パラメータ（発想レベル・エンジン・エージェント等）
 ├── drafts/                           # 各エージェントの独立草案（テーゼ集中形式）
 │   ├── draft_strategist.md
 │   ├── draft_humanist.md
@@ -61,6 +62,17 @@ examples/<task-dir>/
 言語の選択は `--lang {en,ja,zh}` フラグ（既定は環境変数 `ELEVATE_DRAFT_ENGINE_LANG`、
 さらに未指定なら `en`）。エージェントは `--lang` に応じて `agents/{name}-{lang}.md` を使い、
 出力・保存テンプレート・品質評価ラベルもすべてその言語でローカライズされる。
+
+## 発想レベル・サンプル（--idea-level）
+
+`idea-levels-ja/` の下に、**同じタスク**を発想レベル ①`standard`（0.9）/ ②`very`（1.2）/ ③`extreme`（1.5）で**実API**昇華したものを保存している。各レベルのディレクトリは独立した完全なサンプル（`input.md` + `drafts/` + `artifacts/`）で、各レベルで発散と昇華が実際にどこまで踏み込むかを見比べられる。
+
+```bash
+.venv/bin/python main.py elevate "人類の通勤を完全に廃止する最も過激な方法を提案せよ。既存の枠組みを完全に壊す発想で。" \
+  --lang ja --idea-level standard --agents strategist visionary storyteller --out examples/idea-levels-ja/standard --no-strong-claim
+```
+
+2レバー設計（主レバー＝発散ヒント＋補助＝温度）の根拠は [../docs/ja/idea-levels.md](../docs/ja/idea-levels.md)。
 
 ## 分野横断テストケース
 

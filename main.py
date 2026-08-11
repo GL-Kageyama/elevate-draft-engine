@@ -37,7 +37,7 @@ import re
 import sys
 from pathlib import Path
 
-from elevate import Draft, DraftEngine, OutputFormat, extract_format
+from elevate import IDEA_LEVELS, Draft, DraftEngine, OutputFormat, extract_format
 from elevate import i18n
 from elevate.engine import AUFHEBEN_SYSTEM, ELEVATED_MAX_LENGTH, ELEVATED_MIN_LENGTH, FINALIZE_INSTRUCTION
 from elevate.engine import _detect_sentimentality
@@ -71,6 +71,8 @@ def _build_parser() -> argparse.ArgumentParser:
     common.add_argument("--agents", nargs="+", default=None, help="使用するエージェント（既定: 全エージェント）")
     common.add_argument("--out", type=Path, default=None, help="成果物を保存するディレクトリ（省略時は outputs/{タスク名}/ にデフォルト保存）")
     common.add_argument("--no-strong-claim", action="store_true", help="エージェントから旧「最強の主張」断言枠を除去（テーゼ集中形式では実質 no-op。後方互換のため維持）")
+    common.add_argument("--idea-level", default="standard", choices=["standard", "very", "extreme"],
+                        help="発想レベル: どれほど極端な意見を探索するか（standard=温度0.9・一般的に極端 / very=1.2・非常に極端 / extreme=1.5・極度に極端。diverge と aufheben に適用。finalize は常に 0.0）")
     common.add_argument("--runs", type=int, default=1, help="compare の比較を N 回反復して統計集計（平均・勝率・標準偏差・95%%信頼区間）を出力（既定 1）")
     common.add_argument("--baseline", default="single", choices=["single", "best-of-n"], help="compare の比較対象ベースライン（既定 single: 素の単発生成 / best-of-n: 昇華なし最良草案選択＝帰無仮説）")
     common.add_argument("--logic-check", action="store_true", help="最終化の後に論理一貫性の復元工程を適用（昇華の多様化への偏りへの収束工程。既定は無効。旧5軸実測由来）")
@@ -190,6 +192,7 @@ class MockGenerator:
         user: str,
         *,
         temperature: float | None = None,
+        idea_level: str | None = None,
         on_chunk=None,
     ) -> str:
         self.calls.append((system, user, temperature))
@@ -295,6 +298,7 @@ def _make_engine(args: argparse.Namespace) -> DraftEngine:
         "strong_claim_frame": not args.no_strong_claim,
         "enable_logic_check": getattr(args, "logic_check", False),
         "lang": getattr(args, "lang", None),
+        "idea_level": getattr(args, "idea_level", "standard"),
     }
     if args.mock:
         return DraftEngine(MockGenerator(lang=getattr(args, "lang", None)), **engine_args)
@@ -567,6 +571,72 @@ def _save_input(args: argparse.Namespace, task: str) -> None:
     print(_t(loc, "console", "saved", "→ 保存: {path}", path=path))
 
 
+def _save_run_params(args: argparse.Namespace) -> None:
+    """実行時パラメータを parameters.md として保存する。
+
+    成果物を後から解釈・再現できるように、実行時に使ったパラメータを
+    input.md / format.md / knowledge.md と並列の parameters.md に構造化して残す。
+    未指定の既定値・"動的抽出"等の値も明記する（透明性のため）。
+    """
+    if args.out is None:
+        return
+    loc = _loc(getattr(args, "lang", None))
+
+    def L(key: str, default: str) -> str:
+        return _t(loc, "templates", key, default)
+
+    def yesno(b: bool) -> str:
+        return L("params_yes", "はい") if b else L("params_no", "いいえ")
+
+    command = getattr(args, "command", "")
+    idea_level = getattr(args, "idea_level", "standard")
+    level_temp = float(IDEA_LEVELS[idea_level]["temperature"])
+    out_fmt = getattr(args, "output_format", None) or L("params_output_dynamic", "動的抽出（LLM）")
+    has_knowledge = bool(
+        getattr(args, "knowledge", None)
+        or getattr(args, "knowledge_file", None)
+        or getattr(args, "ask_knowledge", False)
+    )
+
+    rows: list[tuple[str, str]] = [
+        (L("params_label_command", "コマンド"), command),
+        (L("params_label_lang", "言語"), i18n.resolve_lang(getattr(args, "lang", None))),
+        (L("params_label_engine", "エンジン"), getattr(args, "engine", "sdk")),
+        (L("params_label_method", "方式"), getattr(args, "method", "two-stage")),
+        (L("params_label_idea_level", "発想レベル"),
+         L("params_idea_level_value", "{level}（温度 {temp}）").format(level=idea_level, temp=f"{level_temp:.1f}")),
+        (L("params_label_agents", "エージェント"),
+         ", ".join(args.agents) if getattr(args, "agents", None) else L("params_all_agents", "全エージェント")),
+        (L("params_label_out", "出力先"), str(args.out)),
+    ]
+    if command == "compare":
+        rows.append((L("params_label_evaluate", "品質評価"), yesno(getattr(args, "evaluate", False))))
+        rows.append((L("params_label_runs", "反復回数"), str(getattr(args, "runs", 1))))
+        rows.append((L("params_label_baseline", "比較対象"), getattr(args, "baseline", "single")))
+    if command in ("elevate", "diverge", "compare") and getattr(args, "no_strong_claim", False):
+        rows.append((L("params_label_no_strong_claim", "断言枠除去"), yesno(True)))
+    if getattr(args, "logic_check", False):
+        rows.append((L("params_label_logic_check", "論理一貫性復元"), yesno(True)))
+    if command == "improve":
+        rows.append((L("params_label_rounds", "改修ラウンド"), str(getattr(args, "rounds", 3))))
+        rows.append((L("params_label_min_improve", "最小改善"), str(getattr(args, "min_improve", 0.01))))
+        rows.append((L("params_label_quality_ceiling", "高品位停止"), str(getattr(args, "quality_ceiling", 0.75))))
+    if command == "synthesize":
+        rows.append((L("params_label_draft_files", "草案ファイル"),
+                     ", ".join(str(p) for p in getattr(args, "draft_files", []))))
+    rows += [
+        (L("params_label_output_format", "出力形式"), out_fmt),
+        (L("params_label_knowledge", "前提知識"), yesno(has_knowledge)),
+    ]
+
+    line = L("params_line", "- {label}: {value}")
+    lines = [L("params_title", "# 実行パラメータ"), ""] + [line.format(label=k, value=v) for k, v in rows]
+    args.out.mkdir(parents=True, exist_ok=True)
+    path = args.out / "parameters.md"
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(_t(loc, "console", "saved", "→ 保存: {path}", path=path))
+
+
 def cmd_generate(args: argparse.Namespace) -> None:
     loc = _loc(getattr(args, "lang", None))
     engine = _make_engine(args)
@@ -619,6 +689,7 @@ def cmd_diverge(args: argparse.Namespace) -> None:
     fmt = _resolve_output_format(args, engine)
     knowledge = _resolve_knowledge(args)
     _save_knowledge(args, knowledge)
+    _save_run_params(args)
     drafts = engine.diverge(
         args.task, agents=args.agents, fmt=fmt, knowledge=knowledge,
         draft_dir=args.out / "drafts" if args.out else None,
@@ -637,6 +708,7 @@ def cmd_synthesize(args: argparse.Namespace) -> None:
     fmt = _resolve_output_format(args, engine)
     knowledge = _resolve_knowledge(args)
     _save_knowledge(args, knowledge)
+    _save_run_params(args)
     drafts = _load_draft_files(args.draft_files)
     reconciliation, elevated = engine.synthesize_with_reconciliation(
         drafts, method=args.method, task=args.task, fmt=fmt, knowledge=knowledge,
@@ -659,6 +731,7 @@ def cmd_elevate(args: argparse.Namespace) -> None:
     fmt = _resolve_output_format(args, engine)
     knowledge = _resolve_knowledge(args)
     _save_knowledge(args, knowledge)
+    _save_run_params(args)
     drafts = engine.diverge(
         args.task, agents=args.agents, fmt=fmt, knowledge=knowledge,
         draft_dir=args.out / "drafts" if args.out else None,
@@ -839,6 +912,7 @@ def cmd_compare(args: argparse.Namespace) -> None:
     fmt = _resolve_output_format(args, engine)
     knowledge = _resolve_knowledge(args)
     _save_knowledge(args, knowledge)
+    _save_run_params(args)
 
     runs = max(1, args.runs)
     baseline_scores: list[float] = []
@@ -1066,6 +1140,7 @@ def cmd_improve(args: argparse.Namespace) -> None:
     fmt = _resolve_output_format(args, engine)
     knowledge = _resolve_knowledge(args)
     _save_knowledge(args, knowledge)
+    _save_run_params(args)
 
     rounds = max(1, args.rounds)
     elevated_prev: str | None = None

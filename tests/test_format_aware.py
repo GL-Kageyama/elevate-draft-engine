@@ -95,7 +95,7 @@ class _FormatStub:
         self.payload = payload
         self.calls: list[tuple[str, str]] = []
 
-    def generate(self, system: str, user: str, *, temperature=None, on_chunk=None) -> str:
+    def generate(self, system: str, user: str, *, temperature=None, idea_level=None, on_chunk=None) -> str:
         self.calls.append((system, user))
         assert system == EXTRACT_FORMAT_SYSTEM  # 軽量な形式分析者のみに抽出させる
         assert temperature == 0.0  # 抽出は決定性（温度 0.0）
@@ -221,7 +221,7 @@ class _RecordingGenerator:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
 
-    def generate(self, system: str, user: str, *, temperature=None, on_chunk=None) -> str:
+    def generate(self, system: str, user: str, *, temperature=None, idea_level=None, on_chunk=None) -> str:
         self.calls.append((system, user))
         if system == EXTRACT_FORMAT_SYSTEM:
             return (
@@ -297,7 +297,7 @@ def test_diverge_output_is_direct_relaxes_draft_cap() -> None:
     class _LongDirectDraft:
         """1116字の草案を返す（散文上限1000超・創作系上限3000未満）。"""
 
-        def generate(self, system: str, user: str, *, temperature=None, on_chunk=None) -> str:
+        def generate(self, system: str, user: str, *, temperature=None, idea_level=None, on_chunk=None) -> str:
             text = "あ" * 1116 + "。"
             return text
 
@@ -332,7 +332,7 @@ def test_diverge_draft_guidance_relaxes_draft_cap() -> None:
     class _LongDraft:
         """1116字の草案を返す（散文上限1000超・フォーマット上限2000未満）。"""
 
-        def generate(self, system: str, user: str, *, temperature=None, on_chunk=None) -> str:
+        def generate(self, system: str, user: str, *, temperature=None, idea_level=None, on_chunk=None) -> str:
             return "あ" * 1116 + "。"
 
     fmt_proposal = OutputFormat(
@@ -418,7 +418,7 @@ def test_format_spec_conflict_degrades_gracefully(capsys) -> None:
         def __init__(self) -> None:
             self.calls = 0
 
-        def generate(self, system: str, user: str, *, temperature=None, on_chunk=None) -> str:
+        def generate(self, system: str, user: str, *, temperature=None, idea_level=None, on_chunk=None) -> str:
             self.calls += 1
             if "草案の作り方" in system:
                 return "【核心的主張】これは草案である。\n【前提】テスト用。"
@@ -456,7 +456,7 @@ def test_completeness_guard_still_raises_without_fmt() -> None:
         def __init__(self) -> None:
             self.calls = 0
 
-        def generate(self, system: str, user: str, *, temperature=None, on_chunk=None) -> str:
+        def generate(self, system: str, user: str, *, temperature=None, idea_level=None, on_chunk=None) -> str:
             self.calls += 1
             return "あ" * 1600 + "。"
 
@@ -477,7 +477,7 @@ def test_single_pass_completeness_uses_format_bounds() -> None:
     class _ShortDirectFinalize:
         """10字のタグラインを返す（固定下限300では不完全・fmtでは完全）。"""
 
-        def generate(self, system: str, user: str, *, temperature=None, on_chunk=None) -> str:
+        def generate(self, system: str, user: str, *, temperature=None, idea_level=None, on_chunk=None) -> str:
             return "新しい一歩。"
 
     fmt = _tagline_format()
@@ -523,14 +523,14 @@ def test_generate_baseline_safety_valve_accepts_overmax_complete(capsys) -> None
         def __init__(self) -> None:
             self.calls = 0
 
-        def generate(self, system: str, user: str, *, temperature=None, on_chunk=None) -> str:
+        def generate(self, system: str, user: str, *, temperature=None, idea_level=None, on_chunk=None) -> str:
             self.calls += 1
             return "詳細な分析の節が続く。" * 250 + "まとめ。"  # max 2500 超過、文終端あり
 
     class _ContaminatedOverMaxBaseline:
         """過長かつファサード汚染の素の生成を返す（安全弁で受け入れない確認用）。"""
 
-        def generate(self, system: str, user: str, *, temperature=None, on_chunk=None) -> str:
+        def generate(self, system: str, user: str, *, temperature=None, idea_level=None, on_chunk=None) -> str:
             return "詳細な分析の節が続く。" * 250 + "まとめ。\n了解しました。**Elevate-Draft-Engine** を起動します。"
 
     fmt = OutputFormat(

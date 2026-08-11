@@ -47,8 +47,8 @@ class MockGenerator:
     def __init__(self) -> None:
         self.calls: list[dict] = []
 
-    def generate(self, system: str, user: str, *, temperature: float | None = None) -> str:
-        self.calls.append({"system": system, "user": user, "temperature": temperature})
+    def generate(self, system: str, user: str, *, temperature: float | None = None, idea_level: str | None = None) -> str:
+        self.calls.append({"system": system, "user": user, "temperature": temperature, "idea_level": idea_level})
         if "Aufheben" in system:
             # 昇華推理は長さ基準（60字以上）で判定される
             return (
@@ -83,7 +83,7 @@ class FlakyGenerator:
         self.n_broken = n_broken
         self.calls = 0
 
-    def generate(self, system: str, user: str, *, temperature: float | None = None) -> str:
+    def generate(self, system: str, user: str, *, temperature: float | None = None, idea_level: str | None = None) -> str:
         self.calls += 1
         if self.calls <= self.n_broken:
             return "途中で打ち切られた不十分な応答"
@@ -134,7 +134,7 @@ def test_generate_regenerates_when_contaminated_by_facade_skill() -> None:
         def __init__(self) -> None:
             self.calls = 0
 
-        def generate(self, system, user, *, temperature=None):
+        def generate(self, system, user, *, temperature=None, idea_level=None):
             self.calls += 1
             if self.calls == 1:
                 return "了解しました。**Elevate-Draft-Engine** を起動します。まずエンジンの場所を特定します。。"
@@ -342,7 +342,8 @@ class _DraftFailsFirstAgentGenerator:
         self.n_fail = n_fail
         self.calls = 0
 
-    def generate(self, system: str, user: str, *, temperature: float | None = None, on_chunk=None) -> str:
+    def generate(self, system: str, user: str, *, temperature: float | None = None,
+                 idea_level: str | None = None, on_chunk=None) -> str:
         from elevate.engine import DRAFT_MAX_LENGTH
 
         self.calls += 1
@@ -413,6 +414,7 @@ class _StreamingMockGenerator:
         user: str,
         *,
         temperature: float | None = None,
+        idea_level: str | None = None,
         on_chunk=None,
     ) -> str:
         self.calls += 1
@@ -537,6 +539,50 @@ def test_synthesize_two_stage_reconcile_uses_draft_temperature_finalize_zero() -
     engine.synthesize(_draft_pair())
     assert client.calls[0]["temperature"] == 0.9
     assert client.calls[1]["temperature"] is None  # 既定温度（0.0）
+
+
+# ---- 発想レベル（idea_level） ----
+
+def test_idea_level_maps_temperature() -> None:
+    """idea_level ごとに draft_temperature が 0.9 / 1.2 / 1.5 に解決される。"""
+    assert DraftEngine(MockGenerator(), idea_level="standard").draft_temperature == 0.9
+    assert DraftEngine(MockGenerator(), idea_level="very").draft_temperature == 1.2
+    assert DraftEngine(MockGenerator(), idea_level="extreme").draft_temperature == 1.5
+
+
+def test_idea_level_diverge_uses_level_temperature_and_level() -> None:
+    """diverge は idea_level の温度と idea_level 自体を generate に渡す（発想レベル）。"""
+    client = MockGenerator()
+    engine = DraftEngine(client, idea_level="very")
+    engine.diverge("タスク")
+    assert all(c["temperature"] == 1.2 for c in client.calls)
+    assert all(c["idea_level"] == "very" for c in client.calls)
+
+
+def test_idea_level_aufheben_uses_same_level_finalize_zero() -> None:
+    """昇華は発想と同じ idea_level を使い、最終化は idea_level なし（温度0.0）。"""
+    client = MockGenerator()
+    engine = DraftEngine(client, idea_level="extreme")
+    engine.synthesize(_draft_pair())
+    assert client.calls[0]["temperature"] == 1.5
+    assert client.calls[0]["idea_level"] == "extreme"
+    assert client.calls[1]["temperature"] is None  # finalize: 既定 0.0
+    assert client.calls[1]["idea_level"] is None  # finalize: 発想レベルは適用しない
+
+
+def test_idea_level_draft_temperature_backward_compat() -> None:
+    """idea_level 未指定なら従来の draft_temperature が優先され、レベルは standard。"""
+    client = MockGenerator()
+    engine = DraftEngine(client, draft_temperature=0.7)
+    engine.diverge("タスク")
+    assert all(c["temperature"] == 0.7 for c in client.calls)
+    assert all(c["idea_level"] == "standard" for c in client.calls)
+
+
+def test_idea_level_unknown_raises() -> None:
+    """不明な idea_level は即失敗（タイポの静かな無視を防ぐ）。"""
+    with pytest.raises(ValueError):
+        DraftEngine(MockGenerator(), idea_level="ultra")
 
 
 def test_synthesize_reconcile_prompt_lists_all_agents() -> None:
@@ -705,7 +751,8 @@ class _LongDraftGenerator:
     def __init__(self, length: int) -> None:
         self.text = "あ" * length + "。"
 
-    def generate(self, system: str, user: str, *, temperature: float | None = None, on_chunk=None) -> str:
+    def generate(self, system: str, user: str, *, temperature: float | None = None,
+                 idea_level: str | None = None, on_chunk=None) -> str:
         if on_chunk is not None:
             on_chunk(self.text)  # SDK アダプタ同様、全文を1回で流す（ストリーム保存用）
         return self.text

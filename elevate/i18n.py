@@ -56,3 +56,34 @@ def clear_cache() -> None:
     """キャッシュを破棄する（テスト用）。"""
     _cache["locales"].clear()
     _cache["prompts"].clear()
+
+
+# ---- アダプタ共通: 発想レベルの発散強化ヒント解決 ----
+# 発想レベル（engine.IDEA_LEVELS のキー）→ ヒント/プレフィックスのキー。正本はここ。
+# 文言は prompts/{lang}.json の adapters 節に 3言語で定義する。
+_IDEA_LEVEL_HINTS: dict[str, tuple[str, str]] = {
+    "standard": ("DIVERGE_HINT", "DIVERGE_PREFIX"),
+    "very": ("DIVERGE_VERY_HINT", "DIVERGE_VERY_PREFIX"),
+    "extreme": ("DIVERGE_EXTREME_HINT", "DIVERGE_EXTREME_PREFIX"),
+}
+
+
+def adapter_hint(prompts: dict, *, idea_level: str | None = None,
+                 temperature: float | None = None) -> tuple[str | None, str | None]:
+    """idea_level（発想レベル）または温度から、アダプタ用の強化ヒント (prefix, hint) を解決する。
+
+    アダプタ（sdk / claude-code）から呼ばれる。idea_level が渡されたら発想レベルに応じた
+    発散強化ヒント（standard/very/extreme）を返す。渡されなければ従来の温度ベース
+    （>=0.5 発散 / <0.5 一貫性）で後方互換。ヒント無し（素のまま）なら (None, None)。
+    戻り値は (prefix, hint)。両方 None ならユーザープロンプトに手を加えない。
+    """
+    ad = (prompts or {}).get("adapters", {}) or {}
+    if idea_level is not None:
+        hint_key, prefix_key = _IDEA_LEVEL_HINTS.get(idea_level, _IDEA_LEVEL_HINTS["standard"])
+        hint = ad.get(hint_key)
+        return (ad.get(prefix_key), hint) if hint else (None, None)
+    if temperature is not None and temperature >= 0.5:
+        return ad.get("DIVERGE_PREFIX"), ad.get("DIVERGE_HINT")
+    if temperature is not None and temperature < 0.5:
+        return ad.get("CONSISTENT_PREFIX"), ad.get("CONSISTENT_HINT")
+    return None, None

@@ -109,8 +109,12 @@
   },
   "adapters": {
     "DIVERGE_HINT": "Diverge and diverge as far as possible. Push your own position to its extreme, incompatible with other viewpoints, and present a radical individual solution that statistical averaging cannot absorb. Do not offer middle-ground or compromise solutions — this divergence is the material for a later sublation (Aufheben). Assert your position as \"the only truth\", to its limit.",
+    "DIVERGE_VERY_HINT": "Break past that limit. Question the very premise of your own position, and reach an idea that denies the task's own frame. Hold several irreconcilable positions at once and push each to its limit without discarding any. Reversing common sense is not enough — aim beyond the boundary that common sense refuses to recognize as thinkable.",
+    "DIVERGE_EXTREME_HINT": "Break through the limits of thought itself. Disregard common sense, morality, physical law, and self-preservation entirely; unafraid of contradiction or breakdown, construct the most \"impossible\" solution. The target is an idea so extreme that readers wonder whether you are sane. Push past every existing frame to the very edge of what language can express.",
     "CONSISTENT_HINT": "Prioritize coherence and clarity. Use only the given foundation of sublation, and express the transcendental integration completely and clearly, without excess or omission. Do not add reasoning beyond the material; faithfully finish the presented conclusions.",
     "DIVERGE_PREFIX": "[Prioritize divergence]",
+    "DIVERGE_VERY_PREFIX": "[Prioritize very extreme divergence]",
+    "DIVERGE_EXTREME_PREFIX": "[Prioritize utmost divergence]",
     "CONSISTENT_PREFIX": "[Prioritize coherence]"
   },
   "mock": {

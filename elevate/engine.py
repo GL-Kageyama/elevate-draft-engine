@@ -285,6 +285,31 @@ def _detect_sentimentality(text: str, lang: str | None = None) -> bool:
 # ---- 草案生成の温度（可能な限りの逸脱・発散の確保）。最終化・評価は 0.0（一貫性のため） ----
 DRAFT_TEMPERATURE = 0.9
 
+# ---- 発想レベル（idea_level）: 「どれほど極端な意見を探索するか」の段階選択 ----
+# ① standard（一般的に極端・既定・後方互換）= 温度0.9
+# ② very（非常に極端）                          = 温度1.2
+# ③ extreme（極度に極端）                        = 温度1.5
+# 温度は「サンプリング補助」、対応する発散強化ヒント（プロンプト段階強化）が「主レバー」。
+# ヒント文言とキーの正本は i18n.adapter_hint（prompts/{lang}.json の adapters 節）にあり、
+# ここは温度の正本。どちらも diverge（発想）と aufheben（昇華）に同じレベルを使い、
+# finalize（最終化）は 0.0 不変。温度 1.2 / 1.5 は DeepSeek ゲートウェイ
+# （api.deepseek.com/anthropic）で受理されることを実測で確認済み（2026-08-11）。
+IDEA_LEVELS: dict[str, dict[str, float]] = {
+    "standard": {"temperature": 0.9},
+    "very": {"temperature": 1.2},
+    "extreme": {"temperature": 1.5},
+}
+
+
+def _resolve_idea_level(idea_level: str | None) -> str:
+    """発想レベル名を検証し正規化する。未知の値は即失敗（タイポの静かな無視を防ぐ）。"""
+    level = idea_level or "standard"
+    if level not in IDEA_LEVELS:
+        raise ValueError(
+            f"不明な発想レベル: {level!r}。選択肢: {', '.join(IDEA_LEVELS)}"
+        )
+    return level
+
 # 草案の上限（文字数）。草案はテーゼ集中形式（500〜800字指示）で短くなければならず、
 # 超過は不完全扱いにする（分析レポート化による昇華の過剰包摂・速度悪化を防ぐ回収ライン）。
 DRAFT_MAX_LENGTH = 1000
@@ -350,6 +375,7 @@ class Generator(Protocol):
         user: str,
         *,
         temperature: float | None = None,
+        idea_level: str | None = None,
         on_chunk: Callable[[str], None] | None = None,
     ) -> str: ...
 
@@ -617,6 +643,7 @@ def _generate_with_completeness_guard(
     user: str,
     *,
     temperature: float | None = None,
+    idea_level: str | None = None,
     label: str = "昇華生成",
     is_complete=None,
     sink: Path | None = None,
@@ -627,6 +654,8 @@ def _generate_with_completeness_guard(
     構造が既知の呼び出し側で決定的に検証し、崩れた出力は再生成する。
     上限回数で直らない場合は明示的失敗（不完全出力を評価に渡さない）。
     temperature を渡すことで、昇華は温度0.9、最終化は0.0を実現する。
+    idea_level を渡すと、クライアント（アダプタ）がそのレベルの発散強化ヒントを
+    プロンプトに注入する（diverge・aufheben は同一レベル。finalize は渡さない＝0.0/一貫性）。
     is_complete を渡すと判定を差し替えられる（最終化=文終端 / 止揚=長さ下限）。
 
     fallback_is_complete を渡すと、フォーマット（OutputFormat）認識の完全性判定が
@@ -645,7 +674,9 @@ def _generate_with_completeness_guard(
     last_err = ""
     last_artifact = ""
     for _ in range(AUFHEBEN_MAX_ATTEMPTS):
-        kwargs = {"system": system, "user": user, "temperature": temperature}
+        kwargs: dict = {"system": system, "user": user, "temperature": temperature}
+        if idea_level is not None:
+            kwargs["idea_level"] = idea_level
         handle = None
         if sink is not None:
             sink.parent.mkdir(parents=True, exist_ok=True)
@@ -697,19 +728,22 @@ def _generate_synthesis(generator: Generator, synthesis_user: str, *, sink: Path
 
 
 def _generate_aufheben(generator: Generator, aufheben_user: str, *, temperature: float,
-                       sink: Path | None = None, prompts: dict | None = None) -> str:
+                       idea_level: str | None = None, sink: Path | None = None,
+                       prompts: dict | None = None) -> str:
     """止揚（アウフヘーベン）を生成する。極端に短い（放棄した）出力は再生成。
 
     止揚は「思考の土台」で文終端記号で終わるとは限らないため、終端記号チェックは誤判定を
     招く（実測: 6104字の完全な推理が再生成ループに落ちた）。長さ下限で「止揚が実質的に
     存在するか」だけを判定する。空応答はクライアントが再試行済み。温度は 0.9
     （発散と同率。弁証法的跳躍に創造性を要するため）。
+    idea_level を渡すと、クライアントがそのレベルの発散強化ヒントを注入する（発想レベル。
+    発散と同等。高次化の跳躍もそのレベルの極端さで行う）。
     sink が与えられたら、生成前に空ファイルを作り、生成中に逐次追記する。
     prompts が渡されたら、その言語の system プロンプトを使う（無ければ ja 定数）。
     """
     return _generate_with_completeness_guard(
         generator, _engine_prompt(prompts, "AUFHEBEN_SYSTEM", AUFHEBEN_SYSTEM), aufheben_user,
-        temperature=temperature, label="昇華",
+        temperature=temperature, idea_level=idea_level, label="昇華",
         is_complete=_aufheben_is_complete, sink=sink,
     )
 
@@ -765,16 +799,17 @@ def _generate_logic_check(generator: Generator, artifact: str, task: str, *, sin
 
 def _generate_draft(
     generator: Generator, system: str, user: str, *, temperature: float,
-    sink: Path | None = None, max_length: int = DRAFT_MAX_LENGTH,
+    idea_level: str | None = None, sink: Path | None = None, max_length: int = DRAFT_MAX_LENGTH,
 ) -> str:
     """エージェント草案を生成する。文途中の打ち切りは再生成。温度は draft_temperature。
 
     昇華・最終化と同じ完全性ガード（broken output → regenerate）を草案にも適用する。
+    idea_level を渡すと、クライアントがそのレベルの発散強化ヒントを注入する（発想レベル）。
     sink が与えられたら、生成前に空ファイルを作り、生成中に逐次追記する。
     max_length で草案上限を差し替えられる（創作系タスクは DRAFT_MAX_LENGTH_CREATIVE）。
     """
     return _generate_with_completeness_guard(
-        generator, system, user, temperature=temperature, label="草案生成",
+        generator, system, user, temperature=temperature, idea_level=idea_level, label="草案生成",
         is_complete=lambda text: _draft_is_complete(text, max_length), sink=sink,
     )
 
@@ -905,14 +940,22 @@ class DraftEngine:
         client: Generator,
         *,
         draft_temperature: float = DRAFT_TEMPERATURE,
-        agents_dir: str | Path | None = None,
+        idea_level: str | None = None,
+        agents_dir: str | None = None,
         agents: dict[str, str] | None = None,
         strong_claim_frame: bool = True,
         enable_logic_check: bool = False,
         lang: str | None = None,
     ):
+        # 発想レベル（diverge・aufheben に使う温度と強化ヒントの段階）。既定 standard（温度0.9・後方互換）。
+        # idea_level が明示されたら、そのレベルの温度が draft_temperature より優先される。
+        # 未指定の場合は従来の draft_temperature を尊重し、ヒントは standard（DIVERGE_HINT）を使う。
+        self.idea_level = _resolve_idea_level(idea_level)
+        if idea_level is not None:
+            self.draft_temperature = float(IDEA_LEVELS[self.idea_level]["temperature"])
+        else:
+            self.draft_temperature = draft_temperature
         self.client = client
-        self.draft_temperature = draft_temperature
         self.enable_logic_check = enable_logic_check
         self.lang = i18n.resolve_lang(lang)
         self.prompts: dict = i18n.load_prompts(self.lang)
@@ -1088,7 +1131,8 @@ class DraftEngine:
             try:
                 content = _generate_draft(
                     self.client, self._agents[name], draft_task,
-                    temperature=self.draft_temperature, sink=sink, max_length=max_length,
+                    temperature=self.draft_temperature, idea_level=self.idea_level,
+                    sink=sink, max_length=max_length,
                 )
             except RuntimeError as exc:
                 # 単一エージェントの生成失敗: 部分草案を残さず報告して、次のエージェントへ
@@ -1136,7 +1180,7 @@ class DraftEngine:
             aufheben_user = _build_aufheben_prompt(task, drafts, fmt, knowledge, prompts=self.prompts)
             reconciliation = _generate_aufheben(
                 self.client, aufheben_user, temperature=self.draft_temperature,
-                sink=reconciliation_sink, prompts=self.prompts,
+                idea_level=self.idea_level, sink=reconciliation_sink, prompts=self.prompts,
             )
             finalize_user = _build_finalize_prompt(task, reconciliation, fmt, knowledge, prompts=self.prompts)
             artifact = _generate_finalize(

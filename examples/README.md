@@ -23,6 +23,7 @@ examples/<task-dir>/
 ├── input.md                          # the original task
 ├── format.md                         # extracted output format (OutputFormat)
 ├── knowledge.md                      # prior knowledge (only with --knowledge)
+├── parameters.md                     # the run parameters (idea level, engine, agents, …)
 ├── drafts/                           # each agent's independent draft (thesis-focused)
 │   ├── draft_strategist.md
 │   ├── draft_humanist.md
@@ -55,6 +56,17 @@ Under `i18n/`, samples that **actually generated** the same task (designing a mo
 ```
 
 Language is chosen with the `--lang {en,ja,zh}` flag (defaulting to the environment variable `ELEVATE_DRAFT_ENGINE_LANG`, then `en` if unset). Agents use `agents/{name}-{lang}.md` according to `--lang`, and the output, save templates, and quality-evaluation labels are all localized to that language.
+
+## Idea-level samples (--idea-level)
+
+Under `idea-levels-ja/`, the **same task** sublated at the 3 idea levels — `standard` (0.9) / `very` (1.2) / `extreme` (1.5) — with the **real API**. Each level directory is an independent, complete sample (`input.md` + `drafts/` + `artifacts/`), showing how far the divergence and the sublation actually go at each level.
+
+```bash
+.venv/bin/python main.py elevate "人類の通勤を完全に廃止する最も過激な方法を提案せよ。既存の枠組みを完全に壊す発想で。" \
+  --lang ja --idea-level standard --agents strategist visionary storyteller --out examples/idea-levels-ja/standard --no-strong-claim
+```
+
+See [../docs/idea-levels.md](../docs/idea-levels.md) for the two-lever rationale (divergence hint as the primary lever + temperature).
 
 ## Cross-domain test cases
 

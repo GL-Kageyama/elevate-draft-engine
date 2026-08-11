@@ -84,7 +84,7 @@ class _RecordingGenerator:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
 
-    def generate(self, system: str, user: str, *, temperature=None, on_chunk=None) -> str:
+    def generate(self, system: str, user: str, *, temperature=None, idea_level=None, on_chunk=None) -> str:
         self.calls.append((system, user))
         if "草案の作り方" in system:
             return "【核心的主張】これは草案である。\n- 根拠1: 最重要論点。\n【前提】テスト用。"

@@ -32,8 +32,8 @@ To go beyond the "average-good answer" a single AI shot produces, it takes a two
                   final artifact
 ```
 
-- **DIVERGE**: 8 creator agents × temperature 0.9 each generate independent drafts **diverged to the extreme**. Independence is guaranteed by role diversity (system) plus temperature diversity. Compromise and middle-ground solutions are not material — each agent deliberately produces a sharpened individual solution, to be raised to a higher dimension in the later sublation.
-- **SYNTHESIZE** (the core): reads all drafts and performs sublation reasoning (temp 0.9) that sublates them through the three moments of **negate / preserve / elevate**, then finalization (temp 0.0) that reads only the sublation reasoning. It composes a transcendental integrated solution that no single-viewpoint draft contains.
+- **DIVERGE**: 8 creator agents each generate independent drafts **diverged to the extreme**. Independence is guaranteed by role diversity (system) plus temperature diversity. The **idea level** (`--idea-level`) sets how far the divergence reaches — standard (0.9, default) / very (1.2) / extreme (1.5), each paired with an escalating divergence hint. Compromise and middle-ground solutions are not material — each agent deliberately produces a sharpened individual solution, to be raised to a higher dimension in the later sublation.
+- **SYNTHESIZE** (the core): reads all drafts and performs sublation reasoning at the same idea level's temperature that sublates them through the three moments of **negate / preserve / elevate**, then finalization (temp 0.0) that reads only the sublation reasoning. It composes a transcendental integrated solution that no single-viewpoint draft contains.
   - For example, the clash between the strategist's "profit" and the humanist's "empathy" is sublated not into a logical compromise (conditional acceptance) but into a **new framework that makes both truths hold simultaneously**.
   - "Sublation beats single-shot generation" is a **design goal**, verified by measurement with `compare` (see [Measuring sublation superiority](#measuring-sublation-superiority-compare)).
   - `synthesize()` also **accepts external drafts**. Whatever the origin — an analysis written by a human expert, another model's output, past artifacts — feed in "multiple different viewpoints" and it returns a transcendental integrated solution.
@@ -128,7 +128,7 @@ A file with no suffix placed directly under `agents/` is treated as **en** (to w
 
 ```bash
 python -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/python -m pytest tests/ -q     # 246 tests
+.venv/bin/python -m pytest tests/ -q     # 259 tests
 
 # Check the pipeline end-to-end with a mock (no API needed)
 .venv/bin/python main.py compare "Design a health-AI product" --mock --evaluate
@@ -166,7 +166,7 @@ python main.py improve "TASK" --rounds 3                        # iterative impr
 python main.py improve "TASK" --rounds 3 --evaluate             # + score each round, early-stop on plateau
 ```
 
-Common options: `--lang {en,ja,zh}` (language; default en) / `--mock` (no API needed) / `--engine sdk|claude-code` (default sdk) / `--method two-stage|single-pass` (default two-stage) / `--agents strategist humanist` (restrict agents) / `--out DIR` (save destination for artifacts; when omitted, everything is auto-saved to `outputs/{task}/` — applies to all of diverge / elevate / compare / improve) / `--runs N` (repeat compare N times) / `--baseline single|best-of-n` (comparison baseline) / `--no-strong-claim` (remove the strong-claim frame) / `--logic-check` (restore logical coherence after finalization; disabled by default) / `--rounds N` / `--min-improve` / `--quality-ceiling` (improve iteration count, plateau threshold, and quality-ceiling threshold; the quality ceiling is enabled by default at 0.75) / `--output-format '<JSON>'` (explicitly specify the output format; when omitted, the LLM dynamically extracts it from the task via the real API) / `--knowledge 'TEXT'` / `--knowledge-file PATH` / `--ask-knowledge` (prior knowledge; injects material, constraints, and background info into all stages as the foundation of generation; mutually exclusive; saved to `--out/knowledge.md`)
+Common options: `--lang {en,ja,zh}` (language; default en) / `--mock` (no API needed) / `--engine sdk|claude-code` (default sdk) / `--method two-stage|single-pass` (default two-stage) / `--idea-level {standard,very,extreme}` (how extreme the divergence and sublation reach; default standard) / `--agents strategist humanist` (restrict agents) / `--out DIR` (save destination for artifacts; when omitted, everything is auto-saved to `outputs/{task}/` — applies to all of diverge / elevate / compare / improve) / `--runs N` (repeat compare N times) / `--baseline single|best-of-n` (comparison baseline) / `--no-strong-claim` (remove the strong-claim frame) / `--logic-check` (restore logical coherence after finalization; disabled by default) / `--rounds N` / `--min-improve` / `--quality-ceiling` (improve iteration count, plateau threshold, and quality-ceiling threshold; the quality ceiling is enabled by default at 0.75) / `--output-format '<JSON>'` (explicitly specify the output format; when omitted, the LLM dynamically extracts it from the task via the real API) / `--knowledge 'TEXT'` / `--knowledge-file PATH` / `--ask-knowledge` (prior knowledge; injects material, constraints, and background info into all stages as the foundation of generation; mutually exclusive; saved to `--out/knowledge.md`) / the run parameters are saved to `--out/parameters.md`
 
 ### Output-format detection (format per domain)
 
@@ -175,6 +175,18 @@ Before the pipeline starts, the LLM dynamically extracts the expected output for
 ### Prior-knowledge injection (--knowledge)
 
 Injects material, constraints, and background info into all stages as the foundation of generation (content constraints paired with fmt's form constraints). See [docs/knowledge.md](docs/knowledge.md) for how to specify it, the injection scope, and the save destination.
+
+### Idea levels (--idea-level)
+
+`--idea-level {standard,very,extreme}` selects how extreme a position the divergence (diverge) and the sublation reasoning (Aufheben) reach, applied through two levers: an escalating **divergence hint** (the primary lever — a reasoning model may not reliably honor temperature >1) plus a **temperature** (the secondary lever). Finalization always runs at temperature 0.0 regardless of the level.
+
+| Level | Temperature | Meaning |
+|---|---|---|
+| `standard` (default) | 0.9 | generally extreme — the current behavior (backward compatible) |
+| `very` | 1.2 | very extreme |
+| `extreme` | 1.5 | extremely extreme |
+
+The `sdk` engine passes both the temperature and the hint to the API; the `claude-code` engine (which has no temperature knob) approximates the level through the hint alone. See [docs/idea-levels.md](docs/idea-levels.md) for the two-lever rationale and the gateway findings on temperature >1.
 
 ### Measuring sublation superiority (compare)
 
@@ -242,7 +254,7 @@ elevate-draft-engine/
 │   └── quality.py              # quality evaluation's 3 viewpoints (novelty / originality / surprise)
 ├── skills/
 │   └── elevate-draft-engine/SKILL.md   # facade skill (launches main.py; orchestration is delegated)
-├── tests/                      # 246 tests
+├── tests/                      # 259 tests
 ├── examples/                   # execution samples (cross-domain test cases, etc.)
 │   └── multi-domain/           # cross-domain format-detection + knowledge-injection verification cases
 ├── docs/                       # deep-dive details (output-format / knowledge / measurement / api)
