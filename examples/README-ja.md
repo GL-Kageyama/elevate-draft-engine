@@ -74,6 +74,20 @@ examples/<task-dir>/
 
 2レバー設計（主レバー＝発散ヒント＋補助＝温度）の根拠は [../docs/ja/idea-levels.md](../docs/ja/idea-levels.md)。
 
+## examples の概要
+
+サンプルカテゴリの俯瞰。各タスクディレクトリは独立した完全な実API出力（構造は「タスクごとのファイル」を参照）:
+
+```
+examples/
+├── i18n/                 多言語サンプル（en / ja / zh）: morning-routine、tagline など
+├── idea-levels-ja/       同一タスクを発想レベル standard / very / extreme で昇華
+├── multi-domain/         フォーマット検出（LLM動的抽出）・前提知識注入の検証ケース
+└── rust-oss/             Rust製OSSツールコンセプト（「印」、`memo`、Ephemeris）
+```
+
+`compare` / `improve` のサンプルはタスクディレクトリ内に `run_NN/` / `round_NN/` サブフォルダ（＋ `measurement.md` / `progress.md`）を持つ。いずれも実API出力であり、モックではない。
+
 ## 分野横断テストケース
 
 `multi-domain/` 以下で、フォーマット認識（LLM動的抽出）と前提知識注入の

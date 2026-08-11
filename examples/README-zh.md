@@ -73,6 +73,20 @@ examples/<task-dir>/
 
 两杠杆设计（主杠杆＝发散提示＋辅助＝温度）的依据见 [../docs/zh/idea-levels.md](../docs/zh/idea-levels.md)。
 
+## examples 总览
+
+样本类别的总览。每个任务目录都是独立完整的真实 API 输出（结构见上文「每个任务的文件」）：
+
+```
+examples/
+├── i18n/                 多语言样本（en / ja / zh）：morning-routine、tagline 等
+├── idea-levels-ja/       同一任务在创意水平 standard / very / extreme 下升华
+├── multi-domain/         格式识别（LLM 动态提取）・前提知识注入的验证用例
+└── rust-oss/             Rust 开源（OSS）工具概念（「印」、`memo`、Ephemeris）
+```
+
+`compare` / `improve` 样本在任务目录内带有 `run_NN/` / `round_NN/` 子文件夹（＋ `measurement.md` / `progress.md`）。全部都是真实 API 输出，不是模拟。
+
 ## 跨领域测试用例
 
 在 `multi-domain/` 以下管理格式识别（LLM 动态提取）与前提知识注入的

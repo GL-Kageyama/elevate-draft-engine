@@ -68,6 +68,20 @@ Under `idea-levels-ja/`, the **same task** sublated at the 3 idea levels — `st
 
 See [../docs/idea-levels.md](../docs/idea-levels.md) for the two-lever rationale (divergence hint as the primary lever + temperature).
 
+## Examples overview
+
+The sample categories at a glance. Each task directory is a complete, independent real-API output (structure in *Files per task* above):
+
+```
+examples/
+├── i18n/                 multilingual samples (en / ja / zh): morning-routine, tagline, …
+├── idea-levels-ja/       the same task sublated at idea levels standard / very / extreme
+├── multi-domain/         format-detection (LLM dynamic extraction) & prior-knowledge cases
+└── rust-oss/             Rust-based OSS tool concepts (「印」, `memo`, Ephemeris)
+```
+
+`compare` / `improve` samples add `run_NN/` / `round_NN/` subfolders inside a task directory (with `measurement.md` / `progress.md`). All are real API outputs, not mocks.
+
 ## Cross-domain test cases
 
 Under `multi-domain/`, real-API verification cases for format detection (LLM dynamic extraction) and prior-knowledge injection are managed.
