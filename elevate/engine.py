@@ -387,6 +387,9 @@ def _draft_is_complete(text: str, max_length: int = DRAFT_MAX_LENGTH) -> bool:
     max_length は創作系タスク（歌詞・小説・コピー等）では DRAFT_MAX_LENGTH_CREATIVE に
     緩められる。テーゼ集中の1000字は散文の分析レポート防止用で、作品の完成形が
     1000字を自然に超えるジャンルには効かせない（実測 2026-08-09: 歌詞1116字が上限超過）。
+    タスク固有の draft_guidance（非空の OutputFormat）も同じ——複数節＋実行例を要求する
+    企画案などはテーゼ集中の1000字を自然に超えるため、diverge がフォーマット上限まで
+    緩めた max_length を渡す（実測 2026-08-11: Rust CLIツール企画案の草案1000字超過）。
     """
     if not text:
         return False
@@ -1043,6 +1046,7 @@ class DraftEngine:
         - draft_guidance をタスクに追記して、草案の形式をタスク固有に指示する
           （空なら既存のテーゼ形式のまま——分析レポート・フォールバック時）
         - 草案上限は output_is_direct（成果物そのもの）なら DRAFT_MAX_LENGTH_CREATIVE、
+          非空の draft_guidance（タスク固有形式）ならフォーマット自身の宣言上限まで緩める、
           それ以外は DRAFT_MAX_LENGTH。fmt が無ければ従来どおり _is_creative_task で判定。
 
         knowledge（前提知識）が渡されたら、各エージェントの草案タスクにタスク直後
@@ -1055,7 +1059,20 @@ class DraftEngine:
         if unknown:
             raise ValueError(f"未登録のエージェント: {unknown}（登録済み: {list(self._agents)}）")
         if fmt is not None:
-            max_length = DRAFT_MAX_LENGTH_CREATIVE if fmt.output_is_direct else DRAFT_MAX_LENGTH
+            if fmt.output_is_direct:
+                # 直接成果物（タグライン・詩・歌詞等）は作品の完成形が1000字を自然に超える
+                max_length = DRAFT_MAX_LENGTH_CREATIVE
+            elif fmt.draft_guidance:
+                # タスク固有の草案形式（draft_guidance）はテーゼ集中形式（500〜800字）を
+                # 置き換える。複数節＋実行例を要求する企画案などは1000字を自然に超える
+                # （実測 2026-08-11: Rust CLIツール企画案の草案が7節構成で1000字超過を
+                # 繰り返し、designer/differentiator がスキップされた）。テーゼ集中の上限は
+                # テーゼ形式の草案にのみ効かせ、タスク固有形式にはフォーマット自身の
+                # 宣言上限まで緩める（報告書化はフォーマット上限が防ぐ）。下限は従来の
+                # 分析レポート上限を維持し、これより厳しくしない（短形式タスクで過剰に弾くのを防ぐ）。
+                max_length = max(DRAFT_MAX_LENGTH, min(DRAFT_MAX_LENGTH_CREATIVE, fmt.max_output_length))
+            else:
+                max_length = DRAFT_MAX_LENGTH
         else:
             max_length = DRAFT_MAX_LENGTH_CREATIVE if _is_creative_task(task, self.lang) else DRAFT_MAX_LENGTH
         draft_task = task

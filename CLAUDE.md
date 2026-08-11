@@ -22,6 +22,7 @@ README / SKILL / examples/README must contain **only current information**. Curr
 - **5-axis rubric**: diversity / synthesis / elevation / honesty / utility (equal weights of 0.20). `evaluation/evaluator.py` and `agents/*.md` must not be changed. These five axes are policy, not scoring design goals.
 - **Three-moment dialectic**: the three moments of negate / preserve / elevate are the core of the mechanism. Aufheben temperature 0.9 and finalization temperature 0.0 are fixed.
 - **Thesis-focused format**: a draft consists of three elements — core thesis / grounds / premise — in 500–800 characters. DRAFT_MAX_LENGTH=1000 (relaxed to 3000 for creative tasks).
+- **i18n baseline**: multilingual support (en/ja/zh) is the default baseline for any fix or change. New or modified prompts, CLI messages, templates, and saved output must resolve through the 3-layer mechanism (locale JSON / per-language prompts / mirror tree), and user-facing text must be produced in the run's language (`--lang`).
 
 ## Tests
 

@@ -322,6 +322,41 @@ def test_diverge_output_is_direct_relaxes_draft_cap() -> None:
     assert failures == ["strategist"]
 
 
+def test_diverge_draft_guidance_relaxes_draft_cap() -> None:
+    """fmt.draft_guidance（タスク固有の草案形式）は草案上限をフォーマット上限まで緩める。
+
+    テーゼ集中形式（500〜800字）は draft_guidance が非空のときタスク固有の形式に
+    置き換えられる（企画案の複数節＋実行例などは1000字を自然に超える）。この場合の
+    草案上限はフォーマット自身の宣言上限（クリエイティブ上限で頭打ち）に従う。
+    """
+    class _LongDraft:
+        """1116字の草案を返す（散文上限1000超・フォーマット上限2000未満）。"""
+
+        def generate(self, system: str, user: str, *, temperature=None, on_chunk=None) -> str:
+            return "あ" * 1116 + "。"
+
+    fmt_proposal = OutputFormat(
+        deliverable_type="企画案", description="",
+        draft_guidance="①ツール名②コアコンセプト③課題④ユーザー⑤理由⑥実行例⑦差別化の7節で書け。",
+        finalize_guidance="", min_output_length=300, max_output_length=2000, output_is_direct=False,
+    )
+    engine = DraftEngine(_LongDraft())
+    drafts = engine.diverge("企画案を考えよ", agents=["strategist"], fmt=fmt_proposal)
+    assert len(drafts) == 1, "タスク固有の草案形式（draft_guidance）は1000字超の草案でも成功する"
+
+    # 比較: draft_guidance が空の分析 fmt は従来どおり1000字上限のまま → 失敗
+    fmt_analysis = OutputFormat(
+        deliverable_type="分析", description="", draft_guidance="", finalize_guidance="",
+        min_output_length=300, max_output_length=2000, output_is_direct=False,
+    )
+    engine2 = DraftEngine(_LongDraft())
+    failures: list[str] = []
+    drafts2 = engine2.diverge("分析タスク", agents=["strategist"], fmt=fmt_analysis,
+                              on_error=lambda name, exc: failures.append(name))
+    assert drafts2 == []
+    assert failures == ["strategist"]
+
+
 def test_synthesize_propagates_format_to_finalize() -> None:
     """synthesize_with_reconciliation は fmt を最終化・完全性ガードに伝播する。"""
     fmt = _tagline_format()
