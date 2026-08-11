@@ -42,7 +42,7 @@ examples/<task-dir>/
 
 在 `i18n/` 以下，保存把同一任务（晨间习惯设计）用 3 种语言（en / ja / zh）
 **实际生成**的样本。不是 mock——是用实 API 生成对该任务的**实际答案**。
-各语言目录是独立的 complete 样本（`input.md` + `drafts/` + `artifacts/`）。
+各语言目录都是独立的完整样本（`input.md` + `drafts/` + `artifacts/`）。
 
 ```bash
 # en（省略 --lang 时默认 en）
@@ -59,7 +59,7 @@ examples/<task-dir>/
 ```
 
 语言的选择通过 `--lang {en,ja,zh}` 标志（默认是环境变量 `ELEVATE_DRAFT_ENGINE_LANG`、
-仍未指定则为 `en`）。智能体按 `--lang` 使用 `agents/{name}-{lang}.md`，
+仍未指定则默认为 `en`）。智能体按 `--lang` 使用 `agents/{name}-{lang}.md`，
 输出・保存模板・质量评估标签也全部以该语言本地化。
 
 ## 创意水平样本（--idea-level）
@@ -72,20 +72,6 @@ examples/<task-dir>/
 ```
 
 两杠杆设计（主杠杆＝发散提示＋辅助＝温度）的依据见 [../docs/zh/idea-levels.md](../docs/zh/idea-levels.md)。
-
-## examples 总览
-
-样本类别的总览。每个任务目录都是独立完整的真实 API 输出（结构见上文「每个任务的文件」）：
-
-```
-examples/
-├── i18n/                 多语言样本（en / ja / zh）：morning-routine、tagline 等
-├── idea-levels-ja/       同一任务在创意水平 standard / very / extreme 下升华
-├── multi-domain/         格式识别（LLM 动态提取）・前提知识注入的验证用例
-└── rust-oss/             Rust 开源（OSS）工具概念（「印」、`memo`、Ephemeris）
-```
-
-`compare` / `improve` 样本在任务目录内带有 `run_NN/` / `round_NN/` 子文件夹（＋ `measurement.md` / `progress.md`）。全部都是真实 API 输出，不是模拟。
 
 ## 跨领域测试用例
 
@@ -110,7 +96,7 @@ examples/
 
 ### 比较文档（为了客观审视）
 
-实证不仅是统计，还在于**能实际阅读朴素 AI 生成与升华版**。
+实证不仅是统计，还在于**能实际阅读原始 AI 生成与升华版**。
 用各样本目录的 `comparison.md`（+ `comparison.html` 横排）把两者并列阅读。
 
 ```bash

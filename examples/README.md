@@ -2,7 +2,7 @@
 
 # Examples — accumulated samples
 
-For each task, saves an execution example of **diverge (each agent's draft) → sublation (Aufheben) (artifact)**.
+Saves an execution example of **diverge (each agent's draft) → sublation (Aufheben) (artifact)** for each task.
 
 ## Usage
 
@@ -39,7 +39,7 @@ The real API intermittently returns empty responses from the gateway, so it self
 
 ## Multilingual samples (i18n)
 
-Under `i18n/`, samples that **actually generated** the same task (designing a morning routine) in 3 languages (en / ja / zh) are saved. Not mock — the **real answers** to the task are generated with the real API. Each language directory is an independent, complete sample (`input.md` + `drafts/` + `artifacts/`).
+Under `i18n/`, samples where the **same task** (designing a morning routine) was **actually generated** in 3 languages (en / ja / zh) are saved — not mocks, but the **real answers** produced with the real API. Each language directory is an independent, complete sample (`input.md` + `drafts/` + `artifacts/`).
 
 ```bash
 # en (default en when --lang is omitted)
@@ -67,20 +67,6 @@ Under `idea-levels-ja/`, the **same task** sublated at the 3 idea levels — `st
 ```
 
 See [../docs/idea-levels.md](../docs/idea-levels.md) for the two-lever rationale (divergence hint as the primary lever + temperature).
-
-## Examples overview
-
-The sample categories at a glance. Each task directory is a complete, independent real-API output (structure in *Files per task* above):
-
-```
-examples/
-├── i18n/                 multilingual samples (en / ja / zh): morning-routine, tagline, …
-├── idea-levels-ja/       the same task sublated at idea levels standard / very / extreme
-├── multi-domain/         format-detection (LLM dynamic extraction) & prior-knowledge cases
-└── rust-oss/             Rust-based OSS tool concepts (「印」, `memo`, Ephemeris)
-```
-
-`compare` / `improve` samples add `run_NN/` / `round_NN/` subfolders inside a task directory (with `measurement.md` / `progress.md`). All are real API outputs, not mocks.
 
 ## Cross-domain test cases
 
