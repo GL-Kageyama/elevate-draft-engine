@@ -146,7 +146,7 @@ names. If the user's request is in Japanese, pass `--lang ja`; if Chinese, pass 
 
 ### Step 5: Verify and report
 
-- Verify the saved files (input / each draft / reconciliation / elevated) exist and are non-empty.
+- Verify the saved files (input / each draft / reconciliation / elevated) exist and are non-empty. **The engine creates 0-byte placeholder files first and fills them progressively (streaming)** — a file's mere existence or 0 bytes is **not** a phase/completion signal. Judge by non-empty content (e.g., > 200 bytes), never by file presence alone.
 - For `improve`, report the overall trajectory in `progress.md` (is improvement visible?); for `compare`, report the stats in `measurement.md` (win rate, 95% CI, effect size).
 - Report a summary of the final artifact (`elevated.md`) — the core, the transcendent synthesis that no single-view draft contained (the result of the Aufhebung).
 - **Write the report in the requested language (`lang`)** — the same language as the user's request.
@@ -207,7 +207,7 @@ if Chinese pass --lang zh, otherwise en.)
    - `improve`: `python main.py improve "$TASK" --rounds N [--evaluate] [--lang "$LANG"] [--knowledge "$KNOWLEDGE"] --out "$SAVE_DIR"` — elevated → revision drafts (multiple) → elevation loop
    - `compare`: `python main.py compare "$TASK" --evaluate --runs N [--baseline best-of-n] [--lang "$LANG"] [--knowledge "$KNOWLEDGE"] --out "$SAVE_DIR"` — measured comparison of plain generation vs elevation
    - `synthesize`: `python main.py synthesize "$ENGINE_REPO"/examples/foo/draft_*.md --task "$TASK" [--lang "$LANG"] [--knowledge "$KNOWLEDGE"] --out "$SAVE_DIR"`
-4. Verify the saved files exist and are non-empty (input.md, draft_*.md, reconciliation.md, elevated.md; knowledge.md if knowledge given; improve adds progress.md / compare adds measurement.md).
+4. Verify the saved files exist and are non-empty (input.md, draft_*.md, reconciliation.md, elevated.md; knowledge.md if knowledge given; improve adds progress.md / compare adds measurement.md). Files are created as 0-byte placeholders before content streams in — presence alone is not completion; require non-empty content.
 5. Report — **in the requested language (lang)** — a summary of the elevated artifact:
    especially the sublation, the third position that no single draft contained (the
    Aufhebung). For improve, report the overall trajectory across rounds (is improvement
