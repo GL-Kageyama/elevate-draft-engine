@@ -1,0 +1,12 @@
+# 実行パラメータ
+
+- コマンド: synthesize
+- 言語: ja
+- エンジン: claude-code
+- 方式: two-stage
+- 発想レベル: very（温度 1.2）
+- エージェント: 全エージェント
+- 出力先: examples/ai-life-ensemble-ja/run-01
+- 草案ファイル: examples/ai-life-ensemble-ja/run-01/_stage8/designer.md, examples/ai-life-ensemble-ja/run-01/_stage8/differentiator.md, examples/ai-life-ensemble-ja/run-01/_stage8/futurist.md, examples/ai-life-ensemble-ja/run-01/_stage8/humanist.md, examples/ai-life-ensemble-ja/run-01/_stage8/implementer.md, examples/ai-life-ensemble-ja/run-01/_stage8/storyteller.md, examples/ai-life-ensemble-ja/run-01/_stage8/strategist.md, examples/ai-life-ensemble-ja/run-01/_stage8/visionary.md
+- 出力形式: {"deliverable_type":"小説シリーズ企画書（複数案のピッチ・バイブル）","description":"AI普及後の人間群像劇を長編シリーズとして成立させるため、指定8項目を全て備えた独自フック付きの企画案を2〜3本、会話劇の実例を伴う形で提示したもの。","min_output_length":3000,"max_output_length":20000,"output_is_direct":true,"draft_guidance":"創作系だが、草案は最終企画書ではなく、昇華に渡す先鋭化したテーゼである。1本の草案につき企画案は1本だけに絞り、500〜800字で書く（3000字を超えた草案は不完全として棄却され、昇華に渡らない）。構成は次の3要素：【核心的主張】この企画の賭けを1〜2文で断言する。1画面の人数制約をどう物語の必然に変えるか（人数制約ギミック）と、独自フックとの対応を必ず含める。【根拠】そのギミックが、会話劇の面白さ・主人公の交替・キャラごとのルックの作り分けを同時に成立させる理屈を3点程度。【前提】この企画が賭けている読者像・価値観（これが外れたら企画が崩れる、という一文）。キャラクター名・会話文・色彩の細部・8項目の充足は最終化工程で肉付けするので、草案では世界の機構と賭けに集中せよ。他エージェントと角度が重ならないよう、主人公の交替単位（巻／話／視点人物）と、制約を課す主体（法／経済／認知／記録／儀礼など）を意図的にずらすこと。","finalize_guidance":"最終化工程では、採用する2〜3企画を【企画1】【企画2】…として並べ、各企画を必ず8つの見出し（仮タイトル／ルック／テーマ／シリーズ構造／主要キャラクター／骨子（第1話〜初期アーク）／人数制約ギミック／独自フック）で同順・同形式に整える。見出し記号は【】で統一。主要キャラクターは3〜5名とし、各人について〈欲求／AIとの関わり／ルック／声の違い〉を1行ずつ、全員分そろえて書く。骨子は会話劇の魅力が伝わるよう、台詞を最低1箇所そのまま引用する。全体の冒頭に、3企画に共通する問題意識と互いの差別化点を述べる総説を置き、末尾に各企画のエンタメ性（面白さ・続きが気になる仕掛け）の要点をまとめる。企画案の取捨や比較優位の分析・寸評に終始せず、あくまで企画そのものを完成させて提示する。"}
+- 前提知識: はい
